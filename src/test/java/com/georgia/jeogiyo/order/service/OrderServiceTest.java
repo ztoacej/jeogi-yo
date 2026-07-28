@@ -3,6 +3,7 @@ package com.georgia.jeogiyo.order.service;
 import com.georgia.jeogiyo.address.dto.request.AddressCreateRequest;
 import com.georgia.jeogiyo.address.entity.Address;
 import com.georgia.jeogiyo.address.repository.AddressRepository;
+import com.georgia.jeogiyo.category.entity.Category;
 import com.georgia.jeogiyo.global.exception.BusinessException;
 import com.georgia.jeogiyo.global.response.PageResponse;
 import com.georgia.jeogiyo.global.util.PageUtil;
@@ -15,7 +16,6 @@ import com.georgia.jeogiyo.order.entity.OrderStatus;
 import com.georgia.jeogiyo.order.repository.OrderRepository;
 import com.georgia.jeogiyo.orderitem.entity.OrderItem;
 import com.georgia.jeogiyo.orderitem.repository.OrderItemRepository;
-import com.georgia.jeogiyo.category.entity.Category;
 import com.georgia.jeogiyo.payment.entity.Payment;
 import com.georgia.jeogiyo.payment.entity.PaymentMethod;
 import com.georgia.jeogiyo.payment.entity.PaymentStatus;
@@ -28,9 +28,7 @@ import com.georgia.jeogiyo.store.repository.StoreRepository;
 import com.georgia.jeogiyo.user.entity.Role;
 import com.georgia.jeogiyo.user.entity.User;
 import com.georgia.jeogiyo.user.repository.UserRepository;
-import com.georgia.jeogiyo.support.DomainTestFixture;
 import com.querydsl.jpa.impl.JPAQueryFactory;
-
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,11 +49,11 @@ import java.util.UUID;
 import static com.georgia.jeogiyo.support.DomainTestFixture.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 
 @ExtendWith(MockitoExtension.class)
 class OrderServiceTest {
@@ -156,6 +154,8 @@ class OrderServiceTest {
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
         given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
+        given(productRepository.decreaseStockIfEnough(eq(PRODUCT_ID), eq(STORE_ID), anyInt()))
+                .willReturn(1);
         given(orderRepository.save(any(Order.class))).willAnswer(invocation -> {
             Order order = invocation.getArgument(0);
             ReflectionTestUtils.setField(order, "orderId", ORDER_ID);
@@ -167,7 +167,9 @@ class OrderServiceTest {
         assertThat(response.getOrderId()).isEqualTo(ORDER_ID);
         assertThat(response.getTotalPrice()).isEqualTo(24000);
         assertThat(response.getOrderStatus()).isEqualTo("ORDER_REQUESTED");
-        assertThat(product.getStock()).isEqualTo(28);
+
+        // 조건부 UPDATE 방식이므로 엔티티 stock 변경 대신 repository 호출 여부를 검증한다.
+        then(productRepository).should().decreaseStockIfEnough(PRODUCT_ID, STORE_ID, 2);
         then(orderItemRepository).should().save(any());
     }
 

@@ -108,17 +108,34 @@ public class OrderService {
         DeliveryAreaValidator.validate(address.getRoadAddress());
 
         Integer totalPrice = 0;
+
+        // 재고 정합성 보장
         for (OrderCreateRequest.OrderItemRequest item : orderCreateRequest.getItems()) {
+
+            if (item.getQuantity() <= 0) {
+                throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
+            }
+
             Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId())
                     .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT));
 
             if (!product.getStore().getStoreId().equals(store.getStoreId())) {
                 throw new BusinessException(GlobalErrorCode.PRODUCT_NOT_IN_STORE);
             }
+
             if (!product.isOrderable()) {
                 throw new BusinessException(GlobalErrorCode.PRODUCT_NOT_ORDERABLE);
             }
-            product.decreaseStock(item.getQuantity());
+            // 조건부 UPDATE로 재고 차감 성공 여부를 DB에서 최종 검증한다.
+            int updatedRows = productRepository.decreaseStockIfEnough(
+                    item.getProductId(),
+                    store.getStoreId(),
+                    item.getQuantity()
+            );
+
+            if (updatedRows != 1) {
+                throw new BusinessException(GlobalErrorCode.INSUFFICIENT_STOCK);
+            }
 
             Integer itemTotalPrice = product.getPrice() * item.getQuantity();
             totalPrice += itemTotalPrice;
