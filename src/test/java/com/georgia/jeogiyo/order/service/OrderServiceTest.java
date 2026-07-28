@@ -52,8 +52,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
 
 @ExtendWith(MockitoExtension.class)
 class OrderServiceTest {
@@ -729,6 +727,35 @@ class OrderServiceTest {
         assertThat(product.getStock()).isEqualTo(30);
         assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.CANCEL);
         assertThat(payment.getCancelReason()).isEqualTo("고객 변심");
+    }
+
+    @Test
+    @DisplayName("주문 취소는 이미 다른 요청이 취소한 주문이면 재고를 복구하지 않는다")
+    void cancelOrder_alreadyCanceledByOtherRequest_fail() {
+        User customer = customer();
+        Category category = category();
+        Store store = store(owner(), category);
+        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
+        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+
+        OrderCancelRequest request = new OrderCancelRequest();
+        request.setCancelReason("중복 취소 요청");
+
+        given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
+        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(
+                ORDER_ID,
+                OrderStatus.ORDER_REQUESTED,
+                OrderStatus.CANCELLED
+        )).willReturn(0);
+
+        assertThatThrownBy(() -> orderService.cancelOrder(CUSTOMER_LOGIN_ID, ORDER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("취소할 수 없는 상태");
+
+        then(orderItemRepository).shouldHaveNoInteractions();
+        then(productRepository).shouldHaveNoInteractions();
+        then(paymentRepository).shouldHaveNoInteractions();
     }
 
     @Test
