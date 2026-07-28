@@ -151,7 +151,8 @@ class OrderServiceTest {
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
+        given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID)))
+                .willReturn(List.of(product));
         given(productRepository.decreaseStockIfEnough(eq(PRODUCT_ID), eq(STORE_ID), anyInt()))
                 .willReturn(1);
         given(orderRepository.save(any(Order.class))).willAnswer(invocation -> {
@@ -265,8 +266,7 @@ class OrderServiceTest {
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(productFromOtherStore));
-
+        given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID))).willReturn(List.of(productFromOtherStore));
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("속하지 않은 상품");
@@ -286,7 +286,7 @@ class OrderServiceTest {
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(hiddenProduct));
+        given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID))).willReturn(List.of(hiddenProduct));
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
@@ -307,7 +307,11 @@ class OrderServiceTest {
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(lowStockProduct));
+        given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID)))
+                .willReturn(List.of(lowStockProduct));
+
+        given(productRepository.decreaseStockIfEnough(PRODUCT_ID, STORE_ID, 5))
+                .willReturn(0);
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)

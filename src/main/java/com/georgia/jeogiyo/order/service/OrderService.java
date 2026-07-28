@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderService {
@@ -98,26 +99,47 @@ public class OrderService {
         if (store.isDeleted()) {
             throw new BusinessException(GlobalErrorCode.NOT_FOUND_STORE);
         }
+
         if (store.getStoreStatus() != StoreStatus.OPEN) {
             throw new BusinessException(GlobalErrorCode.STORE_NOT_OPEN);
         }
 
-        Address address = addressRepository.findByUserAndAddressIdAndIsDeletedFalse(user, orderCreateRequest.getAddressId())
+        Address address = addressRepository.findByUserAndAddressIdAndIsDeletedFalse(
+                        user,
+                        orderCreateRequest.getAddressId()
+                )
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.FORBIDDEN_ADDRESS));
 
         DeliveryAreaValidator.validate(address.getRoadAddress());
 
-        Integer totalPrice = 0;
+        if (orderCreateRequest.getItems() == null || orderCreateRequest.getItems().isEmpty()) {
+            throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
+        }
 
-        // 재고 정합성 보장
         for (OrderCreateRequest.OrderItemRequest item : orderCreateRequest.getItems()) {
-
-            if (item.getQuantity() <= 0) {
+            if (item == null || item.getProductId() == null || item.getQuantity() == null || item.getQuantity() <= 0) {
                 throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
             }
+        }
 
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId())
-                    .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT));
+        List<UUID> productIds = orderCreateRequest.getItems().stream()
+                .map(OrderCreateRequest.OrderItemRequest::getProductId)
+                .distinct()
+                .toList();
+
+        Map<UUID, Product> productMap = productRepository
+                .findAllByProductIdInAndIsDeletedFalse(productIds)
+                .stream()
+                .collect(Collectors.toMap(Product::getProductId, product -> product));
+
+        Integer totalPrice = 0;
+
+        for (OrderCreateRequest.OrderItemRequest item : orderCreateRequest.getItems()) {
+            Product product = productMap.get(item.getProductId());
+
+            if (product == null) {
+                throw new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT);
+            }
 
             if (!product.getStore().getStoreId().equals(store.getStoreId())) {
                 throw new BusinessException(GlobalErrorCode.PRODUCT_NOT_IN_STORE);
@@ -126,6 +148,7 @@ public class OrderService {
             if (!product.isOrderable()) {
                 throw new BusinessException(GlobalErrorCode.PRODUCT_NOT_ORDERABLE);
             }
+
             // 조건부 UPDATE로 재고 차감 성공 여부를 DB에서 최종 검증한다.
             int updatedRows = productRepository.decreaseStockIfEnough(
                     item.getProductId(),
@@ -141,14 +164,21 @@ public class OrderService {
             totalPrice += itemTotalPrice;
         }
 
-        Order order = new Order(user, store, address,
-                address.getRoadAddress(), address.getDetailAddress(), address.getZipcode(),
-                totalPrice, OrderStatus.ORDER_REQUESTED);
+        Order order = new Order(
+                user,
+                store,
+                address,
+                address.getRoadAddress(),
+                address.getDetailAddress(),
+                address.getZipcode(),
+                totalPrice,
+                OrderStatus.ORDER_REQUESTED
+        );
+
         Order savedOrder = orderRepository.save(order);
 
         for (OrderCreateRequest.OrderItemRequest item : orderCreateRequest.getItems()) {
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId())
-                    .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT));
+            Product product = productMap.get(item.getProductId());
             Integer itemTotalPrice = product.getPrice() * item.getQuantity();
 
             OrderItem orderItem = new OrderItem(
@@ -159,6 +189,7 @@ public class OrderService {
                     product.getPrice(),
                     itemTotalPrice
             );
+
             orderItemRepository.save(orderItem);
         }
 
