@@ -132,7 +132,7 @@ class OrderServiceTest {
     }
 
     private OrderItem orderItem(UUID orderId, UUID productId, Integer quantity, Integer unitPrice, Integer itemTotalPrice) {
-        return new OrderItem(orderId, productId, quantity, unitPrice, itemTotalPrice);
+        return new OrderItem(orderId, productId, "테스트 상품", quantity, unitPrice, itemTotalPrice);
     }
 
     // ---------- 6-1: 주문 생성 ----------
@@ -325,12 +325,10 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
-        Product product = product(store, category, 12000, 30, false);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
 
         OrderDetailResponse response = orderService.getOrderDetail(CUSTOMER_LOGIN_ID, ORDER_ID);
 
@@ -366,13 +364,11 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
-        Product product = product(store, category, 12000, 30, false);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(OWNER_LOGIN_ID)).willReturn(Optional.of(owner));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
 
         OrderDetailResponse response = orderService.getOrderDetail(OWNER_LOGIN_ID, ORDER_ID);
 
@@ -409,12 +405,10 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
-        Product product = product(store, category, 12000, 30, false);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(MASTER_LOGIN_ID)).willReturn(Optional.of(master));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
 
         OrderDetailResponse response = orderService.getOrderDetail(MASTER_LOGIN_ID, ORDER_ID);
 

@@ -151,8 +151,14 @@ public class OrderService {
                     .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT));
             Integer itemTotalPrice = product.getPrice() * item.getQuantity();
 
-            OrderItem orderItem = new OrderItem(savedOrder.getOrderId(), item.getProductId(), item.getQuantity(),
-                    product.getPrice(), itemTotalPrice);
+            OrderItem orderItem = new OrderItem(
+                    savedOrder.getOrderId(),
+                    item.getProductId(),
+                    product.getProductName(),
+                    item.getQuantity(),
+                    product.getPrice(),
+                    itemTotalPrice
+            );
             orderItemRepository.save(orderItem);
         }
 
@@ -182,12 +188,9 @@ public class OrderService {
 
         List<OrderDetailResponse.OrderItemResponse> itemResponses = new ArrayList<>();
         for (OrderItem item : orderItems) {
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId())
-                    .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT));
-
             OrderDetailResponse.OrderItemResponse itemResponse = new OrderDetailResponse.OrderItemResponse();
             itemResponse.setProductId(item.getProductId());
-            itemResponse.setProductName(product.getProductName());
+            itemResponse.setProductName(item.getProductName());
             itemResponse.setQuantity(item.getQuantity());
             itemResponse.setUnitPrice(item.getUnitPrice());
             itemResponse.setItemTotalPrice(item.getItemTotalPrice());
