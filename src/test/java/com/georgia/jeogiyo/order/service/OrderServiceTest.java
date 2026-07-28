@@ -97,7 +97,10 @@ class OrderServiceTest {
     private Payment payment(PaymentStatus status) {
         Order order = order(customer(), store(owner(), category()), address(customer(), ADDRESS_ID, "서울특별시 종로구 세종대로 172"),
                 ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
-        return new Payment(order, customer(), PaymentMethod.CARD, 24000);
+
+        Payment payment = new Payment(order, customer(), PaymentMethod.CARD, 24000);
+        ReflectionTestUtils.setField(payment, "paymentStatus", status);
+        return payment;
     }
 
     private Product product(Store store, Category category, int price, int stock, boolean hidden) {
@@ -133,6 +136,27 @@ class OrderServiceTest {
 
     private OrderItem orderItem(UUID orderId, UUID productId, Integer quantity, Integer unitPrice, Integer itemTotalPrice) {
         return new OrderItem(orderId, productId, "테스트 상품", quantity, unitPrice, itemTotalPrice);
+    }
+
+    private OrderSearchResponse orderSearchResponse() {
+        OrderSearchResponse response = new OrderSearchResponse();
+        response.setOrderId(ORDER_ID);
+        response.setStoreId(STORE_ID);
+        response.setStoreName("테스트 가게");
+        response.setOrderStatus("ORDER_REQUESTED");
+        response.setTotalPrice(24000);
+        response.setCreatedAt(LocalDateTime.now());
+        return response;
+    }
+
+    private OrderStoreSearchResponse orderStoreSearchResponse() {
+        OrderStoreSearchResponse response = new OrderStoreSearchResponse();
+        response.setOrderId(ORDER_ID);
+        response.setCustomerName("고객");
+        response.setOrderStatus("ORDER_REQUESTED");
+        response.setTotalPrice(24000);
+        response.setCreatedAt(LocalDateTime.now());
+        return response;
     }
 
     // ---------- 6-1: 주문 생성 ----------
@@ -447,16 +471,12 @@ class OrderServiceTest {
     @DisplayName("CUSTOMER는 본인 주문 목록을 조회할 수 있다")
     void searchOrders_customer_success() {
         User customer = customer();
-        Category category = category();
-        Store store = store(owner(), category);
-        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
-        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        OrderSearchResponse item = orderSearchResponse();
         Pageable pageable = PageUtil.toPageable(0, 10, "desc");
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.searchOrders(isNull(), eq(Role.CUSTOMER), eq(CUSTOMER_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of(order)));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+                .willReturn(new PageImpl<>(List.of(item)));
 
         PageResponse<OrderSearchResponse> response = orderService.searchOrders(CUSTOMER_LOGIN_ID, null, pageable);
 
@@ -468,17 +488,12 @@ class OrderServiceTest {
     @DisplayName("MASTER는 전체 주문 목록을 조회할 수 있다")
     void searchOrders_master_success() {
         User master = master();
-        User customer = customer();
-        Category category = category();
-        Store store = store(owner(), category);
-        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
-        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        OrderSearchResponse item = orderSearchResponse();
         Pageable pageable = PageUtil.toPageable(0, 10, "desc");
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(MASTER_LOGIN_ID)).willReturn(Optional.of(master));
         given(orderRepository.searchOrders(isNull(), eq(Role.MASTER), eq(MASTER_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of(order)));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+                .willReturn(new PageImpl<>(List.of(item)));
 
         PageResponse<OrderSearchResponse> response = orderService.searchOrders(MASTER_LOGIN_ID, null, pageable);
 
@@ -493,7 +508,7 @@ class OrderServiceTest {
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.searchOrders(isNull(), eq(Role.CUSTOMER), eq(CUSTOMER_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of()));
+                .willReturn(new PageImpl<OrderSearchResponse>(List.of()));
 
         orderService.searchOrders(CUSTOMER_LOGIN_ID, null, pageable);
 
@@ -519,18 +534,15 @@ class OrderServiceTest {
     @DisplayName("OWNER는 본인 가게의 주문 목록을 조회할 수 있다")
     void searchOrdersByStore_owner_success() {
         User owner = owner();
-        User customer = customer();
         Category category = category();
         Store store = store(owner, category);
-        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
-        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        OrderStoreSearchResponse item = orderStoreSearchResponse();
         Pageable pageable = PageUtil.toPageable(0, 10, "desc");
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(OWNER_LOGIN_ID)).willReturn(Optional.of(owner));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(orderRepository.searchOrdersByStore(eq(STORE_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of(order)));
-        given(userRepository.findByUserIdAndIsDeletedFalse(CUSTOMER_ID)).willReturn(Optional.of(customer));
+                .willReturn(new PageImpl<>(List.of(item)));
 
         PageResponse<OrderStoreSearchResponse> response = orderService.searchOrdersByStore(OWNER_LOGIN_ID, STORE_ID, null, pageable);
 
@@ -571,18 +583,15 @@ class OrderServiceTest {
     @DisplayName("MASTER는 모든 가게의 주문 목록을 조회할 수 있다")
     void searchOrdersByStore_master_success() {
         User master = master();
-        User customer = customer();
         Category category = category();
         Store store = store(owner(), category);
-        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
-        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        OrderStoreSearchResponse item = orderStoreSearchResponse();
         Pageable pageable = PageUtil.toPageable(0, 10, "desc");
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(MASTER_LOGIN_ID)).willReturn(Optional.of(master));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(orderRepository.searchOrdersByStore(eq(STORE_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of(order)));
-        given(userRepository.findByUserIdAndIsDeletedFalse(CUSTOMER_ID)).willReturn(Optional.of(customer));
+                .willReturn(new PageImpl<>(List.of(item)));
 
         PageResponse<OrderStoreSearchResponse> response = orderService.searchOrdersByStore(MASTER_LOGIN_ID, STORE_ID, null, pageable);
 

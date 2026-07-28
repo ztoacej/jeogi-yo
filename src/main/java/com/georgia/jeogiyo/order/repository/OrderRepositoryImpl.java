@@ -1,11 +1,16 @@
 package com.georgia.jeogiyo.order.repository;
 
-import com.georgia.jeogiyo.order.entity.Order;
+import com.georgia.jeogiyo.order.dto.response.OrderSearchResponse;
+import com.georgia.jeogiyo.order.dto.response.OrderStoreSearchResponse;
 import com.georgia.jeogiyo.order.entity.OrderStatus;
 import com.georgia.jeogiyo.order.entity.QOrder;
+import com.georgia.jeogiyo.store.entity.QStore;
+import com.georgia.jeogiyo.user.entity.QUser;
 import com.georgia.jeogiyo.user.entity.Role;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.OrderSpecifier;
+import com.querydsl.core.types.Projections;
+import com.querydsl.core.types.dsl.CaseBuilder;
 import com.querydsl.jpa.impl.JPAQuery;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +27,7 @@ public class OrderRepositoryImpl implements OrderRepositoryCustom {
     private final JPAQueryFactory queryFactory;
 
     @Override
-    public Page<Order> searchOrders(
+    public Page<OrderSearchResponse> searchOrders(
             OrderStatus orderStatus,
             Role role,
             UUID userId,
@@ -30,6 +35,7 @@ public class OrderRepositoryImpl implements OrderRepositoryCustom {
             Pageable pageable
     ) {
         QOrder order = QOrder.order;
+        QStore store = QStore.store;
 
         BooleanBuilder condition = new BooleanBuilder();
         condition.and(order.isDeleted.isFalse());
@@ -40,8 +46,18 @@ public class OrderRepositoryImpl implements OrderRepositoryCustom {
 
         applyVisibilityCondition(condition, order, role, userId, storeIds);
 
-        List<Order> content = queryFactory
-                .selectFrom(order)
+        List<OrderSearchResponse> content = queryFactory
+                .select(Projections.bean(
+                        OrderSearchResponse.class,
+                        order.orderId.as("orderId"),
+                        order.store.storeId.as("storeId"),
+                        store.storeName.as("storeName"),
+                        order.orderStatus.stringValue().as("orderStatus"),
+                        order.totalPrice.as("totalPrice"),
+                        order.createdAt.as("createdAt")
+                ))
+                .from(order)
+                .leftJoin(order.store, store).on(store.isDeleted.isFalse())
                 .where(condition)
                 .orderBy(createdAtOrder(pageable, order))
                 .offset(pageable.getOffset())
@@ -57,12 +73,13 @@ public class OrderRepositoryImpl implements OrderRepositoryCustom {
     }
 
     @Override
-    public Page<Order> searchOrdersByStore(
+    public Page<OrderStoreSearchResponse> searchOrdersByStore(
             UUID storeId,
             OrderStatus orderStatus,
             Pageable pageable
     ) {
         QOrder order = QOrder.order;
+        QUser user = QUser.user;
 
         BooleanBuilder condition = new BooleanBuilder();
         condition.and(order.isDeleted.isFalse());
@@ -72,8 +89,21 @@ public class OrderRepositoryImpl implements OrderRepositoryCustom {
             condition.and(order.orderStatus.eq(orderStatus));
         }
 
-        List<Order> content = queryFactory
-                .selectFrom(order)
+        List<OrderStoreSearchResponse> content = queryFactory
+                .select(Projections.bean(
+                        OrderStoreSearchResponse.class,
+                        order.orderId.as("orderId"),
+                        new CaseBuilder()
+                                .when(user.isDeleted.isFalse())
+                                .then(user.nickname)
+                                .otherwise("탈퇴한 회원")
+                                .as("customerName"),
+                        order.orderStatus.stringValue().as("orderStatus"),
+                        order.totalPrice.as("totalPrice"),
+                        order.createdAt.as("createdAt")
+                ))
+                .from(order)
+                .leftJoin(order.user, user)
                 .where(condition)
                 .orderBy(createdAtOrder(pageable, order))
                 .offset(pageable.getOffset())

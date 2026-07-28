@@ -276,20 +276,10 @@ public class OrderService {
                     .fetch();
         }
 
-        Page<Order> orderPage = orderRepository.searchOrders(orderStatus, user.getRole(), user.getUserId(), storeIds, pageable);
+        Page<OrderSearchResponse> orderPage =
+                orderRepository.searchOrders(orderStatus, user.getRole(), user.getUserId(), storeIds, pageable);
 
-        return PageResponse.from(orderPage, order -> {
-            Store store = storeRepository.findByStoreIdAndIsDeletedFalse(order.getStore().getStoreId()).orElse(null);
-
-            OrderSearchResponse item = new OrderSearchResponse();
-            item.setOrderId(order.getOrderId());
-            item.setStoreId(order.getStore().getStoreId());
-            item.setStoreName(store != null ? store.getStoreName() : null);
-            item.setOrderStatus(order.getOrderStatus().name());
-            item.setTotalPrice(order.getTotalPrice());
-            item.setCreatedAt(order.getCreatedAt());
-            return item;
-        });
+        return PageResponse.from(orderPage, response -> response);
     }
 
     public PageResponse<OrderStoreSearchResponse> searchOrdersByStore(String loginId, UUID storeId, OrderStatus orderStatus, Pageable pageable) {
@@ -308,19 +298,10 @@ public class OrderService {
             throw new BusinessException(GlobalErrorCode.FORBIDDEN);
         }
 
-        Page<Order> orderPage = orderRepository.searchOrdersByStore(storeId, orderStatus, pageable);
+        Page<OrderStoreSearchResponse> orderPage =
+                orderRepository.searchOrdersByStore(storeId, orderStatus, pageable);
 
-        return PageResponse.from(orderPage, order -> {
-            User customer = userRepository.findByUserIdAndIsDeletedFalse(order.getUser().getUserId()).orElse(null);
-
-            OrderStoreSearchResponse item = new OrderStoreSearchResponse();
-            item.setOrderId(order.getOrderId());
-            item.setCustomerName(customer != null ? customer.getNickname() : "탈퇴한 회원");
-            item.setOrderStatus(order.getOrderStatus().name());
-            item.setTotalPrice(order.getTotalPrice());
-            item.setCreatedAt(order.getCreatedAt());
-            return item;
-        });
+        return PageResponse.from(orderPage, response -> response);
     }
 
     @Transactional
