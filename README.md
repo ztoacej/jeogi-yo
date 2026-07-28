@@ -35,7 +35,7 @@
 | 진혜림      | 공통 (Spring Security, JWT, BaseEntity, CommonResponse, 공통 예외 처리) |
 | 서주성      | 회원(User) + 배송지(Address)                           |
 | 권순혁      | 주문(Order) + 주문상품(OrderItem)                       |
-| 서준영      | 카테고리(Category) + 리뷰(Review)                       |
+| 장준영      | 카테고리(Category) + 리뷰(Review)                       |
 
 ---
 
@@ -172,7 +172,7 @@ CREATE DATABASE delivery_db;
 
 서버 기동 후 Swagger UI: `http://localhost:8080/swagger-ui/index.html`
 
-> `src/main/resources/application.yml`은 기본적으로 `jdbc:postgresql://localhost:5432/delivery_db`를 바라보도록 설정되어 있으며, `spring.jpa.hibernate.ddl-auto=create`로 기동 시 테이블이 자동 생성됩니다.
+> `src/main/resources/application.yml`은 기본적으로 `jdbc:postgresql://localhost:5432/delivery_db`를 바라보도록 설정되어 있으며, `spring.jpa.hibernate.ddl-auto=update`로 로컬 실행 시 기존 테이블을 유지하면서 스키마 변경을 반영합니다.
 
 ---
 
@@ -237,6 +237,7 @@ erDiagram
         uuid order_product_id PK
         uuid order_id FK
         uuid product_id FK
+        string product_name
         int quantity
         int unit_price
         int item_total_price
@@ -298,7 +299,7 @@ erDiagram
 | 가게 | `p_store` | 점주가 등록한 가게 |
 | 상품 | `p_product` | 가게별 판매 상품 |
 | 주문 | `p_order` | 주문 (주문 시점 배송지 스냅샷 포함) |
-| 주문 | `p_order_item` | 주문에 포함된 상품 및 수량/금액 |
+| 주문 | `p_order_item` | 주문 당시 상품명/단가/수량/합계 스냅샷 |
 | 결제 | `p_payment` | 주문 1건당 결제 1건 |
 | 리뷰 | `p_review` | 주문 1건당 리뷰 1개 |
 | AI | `p_ai_history` | Gemini API 요청/응답 이력 |
@@ -341,7 +342,7 @@ sequenceDiagram
         AuthManager -->> AuthFilter: Authentication(principal=UserDetailsImpl)
         AuthFilter ->> JwtUtil: createToken(loginId, role)
         JwtUtil -->> AuthFilter: JWT (Bearer)
-        AuthFilter -->> Client: 200 + accessToken (Body + Cookie)
+        AuthFilter -->> Client: 200 + accessToken (Body)
     else 인증 실패
         AuthManager -->> AuthFilter: AuthenticationException
         AuthFilter -->> Client: 401 아이디 또는 비밀번호 불일치
@@ -372,8 +373,8 @@ sequenceDiagram
     Customer ->> OrderCtrl: POST /orders (storeId, addressId, items)
     OrderCtrl ->> OrderSvc: createOrder(loginId, request)
     OrderSvc ->> OrderSvc: 가게 OPEN 검증, 배송지 소유자/서비스 지역 검증
-    OrderSvc ->> OrderSvc: 상품별 재고 확인 후 차감 (product.decreaseStock)
-    OrderSvc ->> OrderSvc: Order + OrderItem 저장 (orderStatus = ORDER_REQUESTED)
+    OrderSvc ->> OrderSvc: 상품 목록 일괄 조회 후 조건부 UPDATE(decreaseStockIfEnough)로 재고 차감
+    OrderSvc ->> OrderSvc: Order + OrderItem 저장 (상품명/단가/수량/합계 스냅샷 포함)
     OrderSvc -->> Customer: 201 주문 생성 완료
 
     Customer ->> PaymentCtrl: POST /orders/{orderId}/payments (CARD)
@@ -388,7 +389,7 @@ sequenceDiagram
     OrderSvc ->> OrderSvc: 허용된 상태 전이인지 검증 후 변경
     OrderSvc -->> Owner: 200 상태 변경 완료
 
-    loop COOKING_COMPLETED → DELIVERY_PICKED_UP → DELIVERED
+    loop COOKING_COMPLETED → DELIVERY_PICKED_UP → DELIVERED → DELIVERY_COMPLETED → ORDER_COMPLETED
         Owner ->> OrderCtrl: PATCH /orders/{orderId}/orderstatus
         OrderCtrl ->> OrderSvc: updateOrderStatus(...)
         OrderSvc -->> Owner: 200 상태 변경 완료
@@ -397,15 +398,22 @@ sequenceDiagram
     Note over Customer, PaymentSvc: 주문 취소 (ORDER_REQUESTED 상태에서 5분 이내에만 가능)
     Customer ->> OrderCtrl: PATCH /orders/{orderId}/cancel
     OrderCtrl ->> OrderSvc: cancelOrder(loginId, orderId, request)
-    OrderSvc ->> OrderSvc: 주문 상태/취소 기한 검증, 상품 재고 복구
+    OrderSvc ->> OrderSvc: 조건부 상태 변경으로 CANCELLED 처리
+    OrderSvc ->> OrderSvc: 상태 변경에 성공한 요청만 주문상품 재고 복구
     OrderSvc ->> PaymentSvc: 결제가 SUCCESS면 payment.cancel(reason)
-    OrderSvc ->> OrderSvc: orderStatus = CANCELLED
     OrderSvc -->> Customer: 200 주문 취소 완료
 ```
 
 ### 3. AI 상품 설명 생성 (Gemini 연동)
 
-AI 요청이 실패해도 예외를 그대로 던지지 않고 `p_ai_history`에 `FAIL` 이력을 저장한 뒤 `200 OK` + `aiStatus: FAIL` 형태로 응답합니다. 클라이언트는 HTTP 상태 코드가 아니라 응답 바디의 `aiStatus` 값으로 성공/실패를 판단해야 합니다.
+아래 흐름은 OWNER가 기존 상품에 대해 AI 설명 생성을 요청하는
+`POST /products/{productId}/ai-description` API 기준입니다.
+
+이 API는 Gemini 호출에 실패해도 `p_ai_history`에 `FAIL` 이력을 저장하고,
+응답 바디의 `aiStatus: FAIL`, `errorMessage`로 실패 정보를 반환합니다.
+
+단, 상품 등록 과정에서 `useAiDescription=true`로 AI 설명 생성을 사용하는 경우에는
+AI 실패 이력을 저장한 뒤 공통 예외 응답을 반환하며, 상품은 생성되지 않습니다.
 
 ```mermaid
 sequenceDiagram
@@ -434,7 +442,7 @@ sequenceDiagram
         Gemini -->> GeminiSvc: 오류 또는 빈 candidates
         GeminiSvc -->> AiSvc: Exception
         AiSvc ->> AiHistoryRepo: save(AiHistory.fail(errorMessage))
-        AiSvc -->> Owner: 200 응답 (aiStatus = FAIL, errorMessage 포함)
+        AiSvc -->> Owner: 200 AI 설명 생성 실패 응답 (aiStatus = FAIL, errorMessage 포함)
     end
 ```
 
@@ -493,7 +501,7 @@ sequenceDiagram
 | 리뷰 | `/orders/{orderId}/reviews`, `/reviews`, `/stores/{storeId}/reviews` | 작성(배송 완료 주문만), 조회/검색, 수정, 삭제 | CUSTOMER / MASTER |
 | AI 응답 이력 | `/products/{productId}/ai-description`, `/ai-histories` | Gemini 기반 상품 설명 생성 + 이력 저장/조회/검색 | OWNER(생성) / MASTER(조회) |
 
-주문 상태는 `ORDER_REQUESTED → ORDER_ACCEPTED/ORDER_REJECTED → COOKING_COMPLETED → DELIVERY_PICKED_UP → DELIVERED`(또는 `CANCELLED`) 순으로 전이되며, 각 전이는 요청자의 권한(CUSTOMER/OWNER)에 따라 허용 범위가 다릅니다. 상세 요청/응답 필드와 비즈니스 규칙은 팀 API 명세 문서를 참고하세요.
+주문 상태는 `ORDER_REQUESTED → ORDER_ACCEPTED → COOKING_COMPLETED → DELIVERY_PICKED_UP → DELIVERED → DELIVERY_COMPLETED → ORDER_COMPLETED` 순으로 전이됩니다. `ORDER_REQUESTED` 상태에서는 `ORDER_REJECTED` 또는 `CANCELLED`로 변경될 수 있으며, 각 전이는 요청자의 권한(CUSTOMER/OWNER/MASTER)과 상태 전이 규칙에 따라 제한됩니다.
 
 전체 요청/응답 예시와 필드별 비즈니스 규칙은 서버 기동 후 Swagger UI(`/swagger-ui/index.html`)에서 확인할 수 있습니다.
 
@@ -512,7 +520,7 @@ sequenceDiagram
 | 가게 | 가게 등록, 상세 조회, 검색, 수정, 상태 변경, 삭제 | OWNER가 본인 가게를 관리하고, CUSTOMER/OWNER/MASTER는 가게 조회 및 검색 가능 |
 | 상품 | 상품 등록, 상세 조회, 검색, 수정, 삭제, 숨김 상품 처리 | OWNER는 본인 가게 상품을 관리, CUSTOMER는 숨김 처리되지 않은 상품만 조회 |
 | AI | Gemini 기반 상품 설명 생성, AI 이력 상세 조회, AI 이력 검색 | OWNER가 상품 설명을 AI로 생성, MASTER가 AI 응답 이력을 조회/검색 |
-| 주문 | 주문 생성, 상세 조회, 주문 목록 검색, 가게별 주문 검색, 상태 변경, 주문 취소 | 주문 생성 시 재고를 차감, 주문 취소 시 재고를 복구 |
+| 주문 | 주문 생성, 상세 조회, 주문 목록 검색, 가게별 주문 검색, 상태 변경, 주문 취소 | 조건부 UPDATE로 재고를 차감하고, 주문상품에는 주문 당시 상품 정보를 스냅샷으로 저장 |
 | 결제 | 결제 생성, 상세 조회, 목록 검색, 결제 취소, 결제 이력 삭제 | 주문 단위로 결제를 생성하고, 결제 취소 시 주문 취소와 연동해 주문-결제 상태 정합성을 유지 |
 | 리뷰 | 리뷰 등록, 상세 조회, 가게별 리뷰 검색, 수정, 삭제 | 배송 완료된 주문을 기준으로 리뷰 작성 가능 여부와 중복 리뷰를 검증 |
 
@@ -556,7 +564,10 @@ sequenceDiagram
 | 조회 조건 | 삭제 데이터 제외 | 일반 조회/수정/삭제 대상은 `isDeleted=false` 조건으로 조회 |
 | 감사 필드 응답 제외 | 응답 DTO 분리 | Postman/Swagger 응답에는 불필요한 내부 감사 필드 노출 최소화 |
 | 배송지 스냅샷 | 주문 생성 시 주소 정보 복사 | 이후 배송지가 수정되어도 주문 당시 주소 정보를 유지 |
+| 배송 가능 지역 설정 | `application.yml`의 `jeogiyo.delivery-area`에서 관리 | 도로명 추가/변경 시 코드 수정 없이 설정으로 관리 |
 | 재고 관리 | 주문 생성/취소 시 재고 차감/복구 | 주문 상태와 상품 재고의 정합성 유지 |
+| 주문상품 스냅샷 | OrderItem에 상품명/단가/수량/합계 저장 | 상품이 수정/삭제되어도 주문 당시 정보를 유지 |
+| 재고 정합성 | 조건부 UPDATE로 재고 차감 | 동시 주문 상황에서도 재고가 충분할 때만 차감 |
 
 ### 5. QueryDSL 적용 내용
 
@@ -585,7 +596,7 @@ sequenceDiagram
 
 | 상황 | 처리 내용 | 설명 |
 |---|---|---|
-| 주문 생성 | 상품 재고 확인 후 재고 차감 | 주문 생성과 재고 차감을 하나의 흐름으로 처리 |
+| 주문 생성 | 상품 일괄 조회 후 조건부 UPDATE로 재고 차감 | 재고가 충분한 경우에만 DB에서 원자적으로 차감 |
 | 결제 성공 | `PaymentStatus.SUCCESS` 저장 | 결제 성공은 주문 수락과 구분 |
 | 주문 상태 | 결제 성공 후에도 `ORDER_REQUESTED` 유지 | OWNER가 별도로 주문 수락 여부를 결정 |
 | 주문 취소 | `OrderStatus.CANCELLED` 처리 | 주문 요청 상태 등 취소 가능한 조건을 검증한 뒤 주문을 취소 상태로 변경 |
@@ -601,6 +612,8 @@ sequenceDiagram
 | 로그인 처리 위치 충돌 | 로그인 API가 Controller와 Security Filter 양쪽에 구현될 수 있는 상황이 발생 | `JwtAuthenticationFilter`가 `/api/v1/auth/login` 요청을 Spring Security 필터 체인에서 먼저 처리하기 때문에 Controller login 메서드까지는 요청이 전달되지 않음 | 로그인 책임을 `JwtAuthenticationFilter`로 통일하고, Controller는 회원가입 API만 담당하도록 정리                   |
 | Soft Delete 데이터 조회 문제 | 삭제 처리된 데이터가 일반 조회/검색 결과에 포함될 수 있음 | JPA 기본 `findById()`는 `is_deleted` 값을 고려하지 않음 | 일반 조회·수정·삭제는 `findBy...AndIsDeletedFalse`를 사용하고, QueryDSL 검색에는 `isDeleted=false` 조건을 기본 적용 |
 | 주문 취소와 결제 취소 상태 불일치 | 주문은 취소됐지만 결제는 성공 상태로 남거나, 결제만 취소되는 문제가 발생 가능 | 주문, 결제, 재고가 각각 다른 엔티티에서 관리되어 한쪽 상태만 변경될 수 있음 | 주문 취소와 결제 취소 로직을 `@Transactional` 안에서 함께 처리해 주문 상태·결제 상태·재고 복구가 하나의 작업 단위로 반영되도록 구현 [@Transactional 적용범위](https://app.notion.com/p/team-georgia-pjt-dtl/Transactional-39ea26d65cda80639ee4e373b002b865)       |
+| 주문/결제 취소 중복 처리 | 주문 취소와 결제 취소가 동시에 실행되면 재고가 중복 복구될 수 있음 | 상태 조회 후 변경 사이에 동시 요청이 끼어들 수 있음 | 조건부 상태 변경(updateStatusIfCurrent)으로 CANCELLED 선점에 성공한 요청만 재고 복구와 결제 취소를 수행 |
+| 재고 차감 동시성 문제 | 동시에 주문하면 재고보다 많은 주문이 생성될 수 있음 | 상품 조회 후 엔티티 값을 수정하는 읽기-수정-쓰기 방식은 갱신 유실 가능성이 있음 | DB 조건부 UPDATE로 stock >= quantity일 때만 차감하고, 동시성 테스트로 검증 |
 | 결제 중복 생성 방지 | 같은 주문에 대해 결제가 중복 생성될 수 있음 | 단순 조회 후 저장 방식으로는 동시 요청이나 재시도 상황을 완전히 막기 어려움 | 서비스에서 중복 결제를 먼저 검증하고, DB의 `order_id UNIQUE` 제약으로 한 번 더 막음                                 |
 | 예외 처리 방식 혼재 | 도메인마다 에러 응답 형식과 상태 코드 처리가 달라짐 | `IllegalArgumentException`, `ResponseStatusException`, `BusinessException`이 함께 사용됨 | `BusinessException + GlobalErrorCode + GlobalExceptionHandler` 기준으로 공통 예외 응답 구조를 통일       |
 
@@ -622,7 +635,7 @@ sequenceDiagram
 | 공통 응답 정책 | `CommonResponse<T>` 사용 | 응답 구조 일관성 확보 |
 | 페이지 정책 | `PageResponse<T>` + `PageUtil` 사용 | 검색 API 페이지 응답 통일 |
 | 예외 정책 | `BusinessException + ErrorCode + GlobalExceptionHandler` 방향 | 도메인별 예외 응답을 공통 형식으로 맞추는 기준 정리 |
-| 권한 표현식 정책 | `@PreAuthorize`는 `hasRole(...)` 형태로 통일 | `hasAuthority('ROLE_...')`와 혼용하면 `ROLE_` 접두사 누락 실수가 잦아, 신규/리팩터링 대상 API부터 순차 통일 |
+| 권한 표현식 정책 | `@PreAuthorize` 표현식 순차 정리 | 현재 일부 API는 `hasRole`, 일부는 `hasAuthority`를 사용하므로 신규/리팩터링 대상부터 한 기준으로 정리 |
 | 로그인 사용자 타입 정책 | `@AuthenticationPrincipal`은 `UserDetails` 타입으로 통일 | 구현체(`UserDetailsImpl`)를 직접 받는 일부 기존 코드도 순차적으로 통일 |
 
 ---
@@ -666,6 +679,23 @@ sequenceDiagram
 | 차은지 | API 구현보다 도메인 간 정책을 맞추는 일이 더 중요하다는 것을 느꼈습니다. 인증·권한·Soft Delete·주문-결제 연동처럼 기능이 연결될수록 초반 설계와 팀 기준 정리가 중요했고, 병합·테스트 과정의 충돌을 함께 정리하며 협업 경험을 쌓을 수 있었습니다. |
 | 권순혁 | 요구사항 분석, ERD 설계, API 명세서 작성부터 엔티티·리포지터리·서비스 구현까지 이어지는 경험을 통해, 코드 작성 못지않게 그 앞뒤의 설계·협의·검증 절차가 많다는 것을 느꼈고, 프로젝트를 체계적으로 바라보는 시야를 갖게 되었습니다. |
 | 장준영 | 중간에 합류해 follower로 참여했습니다. Git을 본격적으로 써본 것도, 회의를 이렇게 많이 한 것도 처음이라 배울 점이 많았습니다. Annotation과 Spring Boot 내장 함수를 활용하며 실무에서 코드를 재활용하는 경우가 많다는 것도 알았고, 다시 하면 더 잘할 수 있을 것 같습니다. |
+
+---
+
+## 리팩토링 및 피드백 반영
+
+> 최종 피드백 이후 개인 학습과 코드 개선을 목적으로 진행한 리팩토링입니다.  
+> 진행자: 차은지
+
+| 항목 | 개선 내용 | 효과 |
+|---|---|---|
+| 재고 차감 동시성 | 조건부 UPDATE로 `stock >= quantity`일 때만 재고 차감 | 동시에 주문해도 재고보다 많은 주문 생성 방지 |
+| 주문/결제 취소 중복 처리 | 조건부 상태 변경으로 `CANCELLED` 처리에 성공한 요청만 재고 복구 | 주문 취소와 결제 취소 동시 요청 시 중복 재고 복구 방지 |
+| 주문상품 스냅샷 | `OrderItem`에 상품명/단가/수량/합계 저장 | 상품 수정/삭제 후에도 주문 당시 정보 유지 |
+| 주문 조회 최적화 | QueryDSL DTO Projection으로 목록 조회 | 반복 조회와 N+1 가능성 감소 |
+| JWT 예외 처리 | 잘못된 Authorization 헤더도 공통 401 응답 처리 | 인증 실패 응답 일관성 개선 |
+| 배송 가능 지역 설정 | 배송 가능 도로명을 `application.yml` 설정으로 분리 | 지역 변경 시 코드 수정 부담 감소 |
+| JPA 설정 | `ddl-auto=create`에서 `update`로 변경 | 로컬 실행 시 기존 데이터 삭제 위험 감소 |
 
 ---
 
