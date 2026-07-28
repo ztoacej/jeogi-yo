@@ -368,6 +368,19 @@ public class OrderService {
             }
         }
 
+        OrderStatus currentStatus = order.getOrderStatus();
+
+        int updatedRows = orderRepository.updateStatusIfCurrent(
+                orderId,
+                currentStatus,
+                OrderStatus.CANCELLED
+        );
+
+        if (updatedRows != 1) {
+            throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_NOT_ALLOWED);
+        }
+
+        // 조건부 상태 변경에 성공한 최초 요청만 재고 복구를 수행한다.
         List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
         for (OrderItem item : orderItems) {
             Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId()).orElse(null);
@@ -382,6 +395,7 @@ public class OrderService {
             }
         });
 
+        // bulk update 이후 응답/테스트에서 사용할 엔티티 상태를 맞춘다.
         order.changeStatus(OrderStatus.CANCELLED);
         entityManager.flush();
 
@@ -404,6 +418,17 @@ public class OrderService {
             throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_NOT_ALLOWED);
         }
 
+        int updatedRows = orderRepository.updateStatusIfCurrent(
+                orderId,
+                OrderStatus.ORDER_REQUESTED,
+                OrderStatus.CANCELLED
+        );
+
+        if (updatedRows != 1) {
+            throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_NOT_ALLOWED);
+        }
+
+        // 조건부 상태 변경에 성공한 최초 요청만 재고 복구를 수행한다.
         List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
         for (OrderItem item : orderItems) {
             Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId()).orElse(null);

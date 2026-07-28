@@ -122,8 +122,9 @@ public class PaymentServiceImpl implements PaymentService {
         Order order = findOrderById(payment.getOrderId());
         validateCancelableOrder(order);
 
-        payment.cancel(request.getCancelReason());
+        // 주문 취소 선점 → 재고 복구 → 결제 취소 순서로 처리한다.
         orderService.cancelByPayment(order.getOrderId(), loginId);
+        payment.cancel(request.getCancelReason());
         entityManager.flush();
 
         log.info("Payment canceled. paymentId={}, orderId={}, canceledBy={}",

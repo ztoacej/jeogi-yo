@@ -718,6 +718,7 @@ class OrderServiceTest {
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(ORDER_ID, OrderStatus.ORDER_REQUESTED, OrderStatus.CANCELLED)).willReturn(1);
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
         given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
         given(paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(payment));
@@ -804,6 +805,7 @@ class OrderServiceTest {
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(MASTER_LOGIN_ID)).willReturn(Optional.of(master));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(ORDER_ID, OrderStatus.ORDER_ACCEPTED, OrderStatus.CANCELLED)).willReturn(1);
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
         given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
 
@@ -826,6 +828,7 @@ class OrderServiceTest {
         Product product = product(store, category, 12000, 28, false);
 
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(ORDER_ID, OrderStatus.ORDER_REQUESTED, OrderStatus.CANCELLED)).willReturn(1);
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
         given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
 
@@ -833,6 +836,30 @@ class OrderServiceTest {
 
         assertThat(order.getOrderStatus()).isEqualTo(OrderStatus.CANCELLED);
         assertThat(product.getStock()).isEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("cancelByPayment는 이미 다른 요청이 취소한 주문이면 재고를 복구하지 않는다")
+    void cancelByPayment_alreadyCanceledByOtherRequest_fail() {
+        User customer = customer();
+        Category category = category();
+        Store store = store(owner(), category);
+        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
+        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+
+        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(
+                ORDER_ID,
+                OrderStatus.ORDER_REQUESTED,
+                OrderStatus.CANCELLED
+        )).willReturn(0);
+
+        assertThatThrownBy(() -> orderService.cancelByPayment(ORDER_ID, CUSTOMER_LOGIN_ID))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("취소할 수 없는 상태");
+
+        then(orderItemRepository).shouldHaveNoInteractions();
+        then(productRepository).shouldHaveNoInteractions();
     }
 
     @Test
