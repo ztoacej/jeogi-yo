@@ -87,8 +87,9 @@ public class JwtUtil {
         if (StringUtils.hasText(tokenValue) && tokenValue.startsWith(BEARER)) {
             return tokenValue.substring(BEARER.length());
         }
-        log.error("Not Found Token");
-        throw new NullPointerException("Not Found Token");
+
+        log.warn("Invalid Authorization header format");
+        return null;
     }
 
     // JWT 토큰 검증 (위변조 & 만료 검증)

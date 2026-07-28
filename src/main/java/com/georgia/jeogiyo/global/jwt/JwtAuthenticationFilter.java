@@ -59,7 +59,7 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
         User user = ((UserDetailsImpl) authResult.getPrincipal()).getUser();
 
         String token = jwtUtil.createToken(user.getLoginId(), user.getRole());
-        jwtUtil.addJwtToCookie(token, response);
+        //jwtUtil.addJwtToCookie(token, response);
 
         // JSON 응답
         UserLoginResponse loginResponse = UserLoginResponse.of(user, token);

@@ -1,22 +1,5 @@
 package com.georgia.jeogiyo.user.controller;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -30,9 +13,20 @@ import com.georgia.jeogiyo.user.entity.User;
 import com.georgia.jeogiyo.user.fixture.UserFix;
 import com.georgia.jeogiyo.user.service.UserFinder;
 import com.georgia.jeogiyo.user.service.UserService;
-
 import jakarta.persistence.EntityManager;
-import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -149,13 +143,13 @@ public class UserApiTest {
 				.content(objectMapper.writeValueAsString(userLoginRequest))
 		)
 		.andExpect(status().isOk())
-		.andExpect(cookie().exists("Authorization"))
-		// JwtAuthenticationFilter 쪽 로그인 구현 상태상 응답 바디에 아래 내용이 포함되지 않음.
-//		.andExpect(jsonPath("$.accessToken").isNotEmpty())
-//		.andExpect(jsonPath("$.userId").value(user.getUserId().toString()))
-//		.andExpect(jsonPath("$.loginId").value(user.getLoginId()))
-//		.andExpect(jsonPath("$.nickname").value(user.getNickname()))
-//		.andExpect(jsonPath("$.role").value(user.getRole().name()))
+		.andExpect(jsonPath("$.success").value(true))
+		.andExpect(jsonPath("$.message").value("로그인에 성공했습니다."))
+		.andExpect(jsonPath("$.data.accessToken").isNotEmpty())
+		.andExpect(jsonPath("$.data.userId").value(user.getUserId().toString()))
+		.andExpect(jsonPath("$.data.loginId").value(user.getLoginId()))
+		.andExpect(jsonPath("$.data.nickname").value(user.getNickname()))
+		.andExpect(jsonPath("$.data.role").value(user.getRole().name()))
 		;
 	}
 	
@@ -185,7 +179,7 @@ public class UserApiTest {
 		mockMvc
 		.perform(patch(url)
 				.contentType(MediaType.APPLICATION_JSON)
-				.cookie(new Cookie("Authorization", loginResponse.getAccessToken()))
+				.header("Authorization", loginResponse.getAccessToken())
 				.content(objectMapper.writeValueAsString(userUpdateRequest))
 		)
 		.andExpect(status().isOk())
@@ -230,7 +224,7 @@ public class UserApiTest {
 		mockMvc
 		.perform(delete(url)
 				.contentType(MediaType.APPLICATION_JSON)
-				.cookie(new Cookie("Authorization", loginResponse.getAccessToken()))
+				.header("Authorization", loginResponse.getAccessToken())
 				.content(objectMapper.writeValueAsString(userDeleteRequest))
 		)
 		.andExpect(status().isOk())

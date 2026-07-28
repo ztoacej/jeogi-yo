@@ -1,20 +1,17 @@
 package com.georgia.jeogiyo.user.dto.response;
 
-import java.util.UUID;
-
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.georgia.jeogiyo.user.entity.Role;
 import com.georgia.jeogiyo.user.entity.User;
-
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+
+import java.util.UUID;
 
 @Getter
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class UserLoginResponse {
 
-	@JsonIgnore
 	private final String accessToken;
 	
 	private final UUID userId;
