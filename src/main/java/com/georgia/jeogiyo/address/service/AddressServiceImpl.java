@@ -30,13 +30,15 @@ public class AddressServiceImpl implements AddressService {
 	private final AddressFinder addressFinder;
 	
 	private final UserFinder userFinder;
+
+	private final DeliveryAreaValidator deliveryAreaValidator;
 	
 	// 배송지 등록
 	@Override
 	public AddressCreateResponse addressCreate(String loginId, AddressCreateRequest addressCreate) {
 		User user = userFinder.getUserByLoginId(loginId);
-		
-		DeliveryAreaValidator.validate(addressCreate.getRoadAddress());
+
+		deliveryAreaValidator.validate(addressCreate.getRoadAddress());
 		
 		if(addressCreate.getIsDefault() == true) {
 			Address defaultAddress = addressFinder.findByUserAndDefault(user)
@@ -63,7 +65,7 @@ public class AddressServiceImpl implements AddressService {
 		Address address = addressFinder.findByUserAndAddressId(user, UUID.fromString(addressId));
 		
 		if(addressUpdate.getRoadAddress() != null) {
-			DeliveryAreaValidator.validate(addressUpdate.getRoadAddress());
+			deliveryAreaValidator.validate(addressUpdate.getRoadAddress());
 		}
 		
 		if(!address.isDefault() && addressUpdate.getIsDefault()) {

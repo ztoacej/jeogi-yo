@@ -54,6 +54,7 @@ public class OrderService {
     private final JPAQueryFactory queryFactory;
     private final EntityManager entityManager;
     private final PaymentRepository paymentRepository;
+    private final DeliveryAreaValidator deliveryAreaValidator;
 
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_TRANSITIONS = Map.of(
             OrderStatus.ORDER_REQUESTED, Set.of(OrderStatus.ORDER_ACCEPTED, OrderStatus.ORDER_REJECTED),
@@ -66,7 +67,8 @@ public class OrderService {
 
     public OrderService(OrderRepository orderRepository, AddressRepository addressRepository, ProductRepository productRepository,
                         OrderItemRepository orderItemRepository, StoreRepository storeRepository, UserRepository userRepository,
-                        JPAQueryFactory queryFactory, EntityManager entityManager, PaymentRepository paymentRepository) {
+                        JPAQueryFactory queryFactory, EntityManager entityManager, PaymentRepository paymentRepository,
+                        DeliveryAreaValidator deliveryAreaValidator) {
         this.orderRepository = orderRepository;
         this.addressRepository = addressRepository;
         this.productRepository = productRepository;
@@ -76,6 +78,7 @@ public class OrderService {
         this.queryFactory = queryFactory;
         this.entityManager = entityManager;
         this.paymentRepository = paymentRepository;
+        this.deliveryAreaValidator = deliveryAreaValidator;
     }
 
     public Order getOrder(UUID orderId) {
@@ -110,7 +113,7 @@ public class OrderService {
                 )
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.FORBIDDEN_ADDRESS));
 
-        DeliveryAreaValidator.validate(address.getRoadAddress());
+        deliveryAreaValidator.validate(address.getRoadAddress());
 
         if (orderCreateRequest.getItems() == null || orderCreateRequest.getItems().isEmpty()) {
             throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);

@@ -5,7 +5,9 @@ import com.georgia.jeogiyo.address.entity.Address;
 import com.georgia.jeogiyo.address.repository.AddressRepository;
 import com.georgia.jeogiyo.category.entity.Category;
 import com.georgia.jeogiyo.global.exception.BusinessException;
+import com.georgia.jeogiyo.global.exception.GlobalErrorCode;
 import com.georgia.jeogiyo.global.response.PageResponse;
+import com.georgia.jeogiyo.global.util.DeliveryAreaValidator;
 import com.georgia.jeogiyo.global.util.PageUtil;
 import com.georgia.jeogiyo.order.dto.request.OrderCancelRequest;
 import com.georgia.jeogiyo.order.dto.request.OrderCreateRequest;
@@ -50,8 +52,7 @@ import static com.georgia.jeogiyo.support.DomainTestFixture.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class OrderServiceTest {
@@ -68,6 +69,7 @@ class OrderServiceTest {
     @Mock private JPAQueryFactory queryFactory;
     @Mock private EntityManager entityManager;
     @Mock private PaymentRepository paymentRepository;
+    @Mock private DeliveryAreaValidator deliveryAreaValidator;
 
     private OrderService orderService;
 
@@ -76,7 +78,7 @@ class OrderServiceTest {
         orderService = new OrderService(
                 orderRepository, addressRepository, productRepository,
                 orderItemRepository, storeRepository, userRepository,
-                queryFactory, entityManager, paymentRepository
+                queryFactory, entityManager, paymentRepository, deliveryAreaValidator
         );
     }
 
@@ -269,6 +271,10 @@ class OrderServiceTest {
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(farAddress));
+
+        willThrow(new BusinessException(GlobalErrorCode.OUT_OF_SERVICE_AREA))
+                .given(deliveryAreaValidator)
+                .validate(farAddress.getRoadAddress());
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)

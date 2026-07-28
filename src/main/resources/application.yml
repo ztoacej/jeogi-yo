@@ -33,3 +33,19 @@ logging:
 gemini:
   api:
     key: ${GEMINI_API_KEY}
+
+jeogiyo:
+  delivery-area:
+    road-address-prefix: 서울특별시 종로구
+    roads:
+      - 세종대로
+      - 새문안로
+      - 종로1길
+      - 종로3길
+      - 사직로
+      - 삼봉로
+      - 자하문로
+      - 율곡로
+      - 우정국로
+      - 경희궁길
+      - 경희궁1길
