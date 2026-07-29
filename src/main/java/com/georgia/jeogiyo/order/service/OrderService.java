@@ -207,7 +207,7 @@ public class OrderService {
         return response;
     }
 
-
+    @Transactional(readOnly = true)
     public OrderDetailResponse getOrderDetail(String loginId, UUID orderId) {
 
         User user = userRepository.findByLoginIdAndIsDeletedFalse(loginId)
@@ -264,6 +264,7 @@ public class OrderService {
         throw new BusinessException(GlobalErrorCode.FORBIDDEN_ORDER);
     }
 
+    @Transactional(readOnly = true)
     public PageResponse<OrderSearchResponse> searchOrders(String loginId, OrderStatus orderStatus, Pageable pageable) {
 
         User user = userRepository.findByLoginIdAndIsDeletedFalse(loginId)
@@ -285,6 +286,7 @@ public class OrderService {
         return PageResponse.from(orderPage, response -> response);
     }
 
+    @Transactional(readOnly = true)
     public PageResponse<OrderStoreSearchResponse> searchOrdersByStore(String loginId, UUID storeId, OrderStatus orderStatus, Pageable pageable) {
 
         User user = userRepository.findByLoginIdAndIsDeletedFalse(loginId)
