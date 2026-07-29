@@ -99,10 +99,6 @@ public class OrderService {
         Store store = storeRepository.findByStoreIdAndIsDeletedFalse(orderCreateRequest.getStoreId())
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_STORE));
 
-        if (store.isDeleted()) {
-            throw new BusinessException(GlobalErrorCode.NOT_FOUND_STORE);
-        }
-
         if (store.getStoreStatus() != StoreStatus.OPEN) {
             throw new BusinessException(GlobalErrorCode.STORE_NOT_OPEN);
         }
