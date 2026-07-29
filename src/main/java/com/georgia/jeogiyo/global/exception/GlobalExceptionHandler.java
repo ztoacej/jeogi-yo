@@ -2,6 +2,7 @@ package com.georgia.jeogiyo.global.exception;
 
 import com.georgia.jeogiyo.global.response.CommonResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -60,6 +61,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.FORBIDDEN)
                 .body(CommonResponse.fail("해당 요청에 대한 권한이 없습니다."));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<CommonResponse<Void>> handleDataIntegrityViolationException(
+            DataIntegrityViolationException e
+    ) {
+        log.warn("DataIntegrityViolationException: {}", e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(CommonResponse.fail("이미 처리되었거나 중복된 요청입니다."));
     }
 
     @ExceptionHandler(Exception.class)
