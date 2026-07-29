@@ -6,7 +6,8 @@ import com.georgia.jeogiyo.global.exception.BusinessException;
 import com.georgia.jeogiyo.global.exception.GlobalErrorCode;
 import com.georgia.jeogiyo.global.response.PageResponse;
 import com.georgia.jeogiyo.global.util.PageUtil;
-import com.georgia.jeogiyo.review.repository.ReviewRepository;
+import com.georgia.jeogiyo.review.service.ReviewSummary;
+import com.georgia.jeogiyo.review.service.ReviewSummaryReader;
 import com.georgia.jeogiyo.store.dto.request.StoreCreateRequest;
 import com.georgia.jeogiyo.store.dto.request.StoreStatusUpdateRequest;
 import com.georgia.jeogiyo.store.dto.request.StoreUpdateRequest;
@@ -39,7 +40,7 @@ public class StoreServiceImpl implements StoreService {
     private final StoreRepository storeRepository;
     private final UserFinder userFinder;
     private final CategoryRepository categoryRepository;
-    private final ReviewRepository reviewRepository;
+    private final ReviewSummaryReader reviewSummaryReader;
     private final EntityManager entityManager;
 
     @Override
@@ -179,7 +180,7 @@ public class StoreServiceImpl implements StoreService {
     }
 
     private StoreResponse toResponse(Store store) {
-        StoreReviewSummary reviewSummary = getReviewSummary(store.getStoreId());
+        ReviewSummary reviewSummary = reviewSummaryReader.getSummary(store.getStoreId());
 
         return StoreResponse.builder()
                 .storeId(store.getStoreId())
@@ -208,30 +209,4 @@ public class StoreServiceImpl implements StoreService {
                 .build();
     }
 
-    private Double roundAverage(Double averageRating) {
-        return averageRating == null ? 0.0 : Math.round(averageRating * 10.0) / 10.0;
-    }
-
-    private StoreReviewSummary getReviewSummary(UUID storeId) {
-        if (storeId == null) {
-            return new StoreReviewSummary(0, 0.0);
-        }
-
-        int reviewCount = Math.toIntExact(
-                reviewRepository.countByStore_StoreIdAndIsDeletedFalse(storeId)
-        );
-
-        Double averageRating = reviewRepository.findAverageRatingByStoreId(storeId);
-
-        return new StoreReviewSummary(
-                reviewCount,
-                roundAverage(averageRating)
-        );
-    }
-
-    private record StoreReviewSummary(
-            Integer reviewCount,
-            Double averageRating
-    ) {
-    }
 }

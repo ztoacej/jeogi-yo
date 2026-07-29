@@ -5,6 +5,8 @@ import com.georgia.jeogiyo.category.repository.CategoryRepository;
 import com.georgia.jeogiyo.global.exception.BusinessException;
 import com.georgia.jeogiyo.global.exception.GlobalErrorCode;
 import com.georgia.jeogiyo.global.response.PageResponse;
+import com.georgia.jeogiyo.review.service.ReviewSummary;
+import com.georgia.jeogiyo.review.service.ReviewSummaryReader;
 import com.georgia.jeogiyo.store.dto.request.StoreCreateRequest;
 import com.georgia.jeogiyo.store.dto.request.StoreStatusUpdateRequest;
 import com.georgia.jeogiyo.store.dto.request.StoreUpdateRequest;
@@ -13,7 +15,6 @@ import com.georgia.jeogiyo.store.dto.response.StoreSearchResponse;
 import com.georgia.jeogiyo.store.entity.Store;
 import com.georgia.jeogiyo.store.entity.StoreStatus;
 import com.georgia.jeogiyo.store.repository.StoreRepository;
-import com.georgia.jeogiyo.review.repository.ReviewRepository;
 import com.georgia.jeogiyo.support.DomainTestFixture;
 import com.georgia.jeogiyo.user.entity.User;
 import com.georgia.jeogiyo.user.service.UserFinder;
@@ -66,7 +67,7 @@ class StoreServiceTest {
     private CategoryRepository categoryRepository;
 
     @Mock
-    private ReviewRepository reviewRepository;
+    private ReviewSummaryReader reviewSummaryReader;
 
     @Mock
     private EntityManager entityManager;
@@ -79,7 +80,7 @@ class StoreServiceTest {
                 storeRepository,
                 userFinder,
                 categoryRepository,
-                reviewRepository,
+                reviewSummaryReader,
                 entityManager
         );
     }
@@ -99,6 +100,9 @@ class StoreServiceTest {
             DomainTestFixture.markPersisted(store, STORE_ID);
             return store;
         });
+
+        given(reviewSummaryReader.getSummary(STORE_ID))
+                .willReturn(new ReviewSummary(0, 0.0));
 
         // when: OWNER가 가게 등록을 요청한다.
         StoreResponse response = storeService.createStore(OWNER_LOGIN_ID, request);
@@ -161,6 +165,9 @@ class StoreServiceTest {
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(categoryRepository.findByCategoryIdAndIsDeletedFalse(CATEGORY_ID)).willReturn(Optional.of(category));
 
+        given(reviewSummaryReader.getSummary(STORE_ID))
+                .willReturn(new ReviewSummary(0, 0.0));
+
         // when: OWNER가 본인 가게를 수정한다.
         StoreResponse response = storeService.updateStore(STORE_ID, OWNER_LOGIN_ID, request);
 
@@ -210,6 +217,9 @@ class StoreServiceTest {
         given(userFinder.getUserByLoginId(MASTER_LOGIN_ID)).willReturn(master);
         given(storeRepository.findByStoreIdAndIsDeletedFalse(DomainTestFixture.OTHER_OWNER_STORE_ID))
                 .willReturn(Optional.of(otherOwnerStore));
+
+        given(reviewSummaryReader.getSummary(DomainTestFixture.OTHER_OWNER_STORE_ID))
+                .willReturn(new ReviewSummary(0, 0.0));
 
         // when: MASTER가 가게를 수정한다.
         StoreResponse response = storeService.updateStore(
@@ -340,8 +350,8 @@ class StoreServiceTest {
         Store store = DomainTestFixture.store(owner, category);
 
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
-        given(reviewRepository.countByStore_StoreIdAndIsDeletedFalse(STORE_ID)).willReturn(3L);
-        given(reviewRepository.findAverageRatingByStoreId(STORE_ID)).willReturn(4.333333);
+        given(reviewSummaryReader.getSummary(STORE_ID))
+                .willReturn(new ReviewSummary(3, 4.3));
 
         StoreResponse response = storeService.getStore(STORE_ID);
 
