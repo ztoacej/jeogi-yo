@@ -36,7 +36,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -192,15 +191,7 @@ public class OrderService {
             orderItemRepository.save(orderItem);
         }
 
-        OrderCreateResponse response = new OrderCreateResponse();
-        response.setOrderId(savedOrder.getOrderId());
-        response.setStoreId(savedOrder.getStore().getStoreId());
-        response.setAddress(savedOrder.getRoadAddress() + " " + savedOrder.getDetailAddress());
-        response.setOrderStatus(savedOrder.getOrderStatus().name());
-        response.setTotalPrice(savedOrder.getTotalPrice());
-        response.setCreatedAt(savedOrder.getCreatedAt());
-
-        return response;
+        return OrderCreateResponse.of(savedOrder);
     }
 
     @Transactional(readOnly = true)
@@ -216,27 +207,7 @@ public class OrderService {
 
         List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
 
-        List<OrderDetailResponse.OrderItemResponse> itemResponses = new ArrayList<>();
-        for (OrderItem item : orderItems) {
-            OrderDetailResponse.OrderItemResponse itemResponse = new OrderDetailResponse.OrderItemResponse();
-            itemResponse.setProductId(item.getProductId());
-            itemResponse.setProductName(item.getProductName());
-            itemResponse.setQuantity(item.getQuantity());
-            itemResponse.setUnitPrice(item.getUnitPrice());
-            itemResponse.setItemTotalPrice(item.getItemTotalPrice());
-            itemResponses.add(itemResponse);
-        }
-
-        OrderDetailResponse response = new OrderDetailResponse();
-        response.setOrderId(order.getOrderId());
-        response.setStoreId(order.getStore().getStoreId());
-        response.setAddressId(order.getAddress().getAddressId());
-        response.setOrderStatus(order.getOrderStatus().name());
-        response.setTotalPrice(order.getTotalPrice());
-        response.setCreatedAt(order.getCreatedAt());
-        response.setItems(itemResponses);
-
-        return response;
+        return OrderDetailResponse.of(order, orderItems);
     }
 
     private void validateOrderAccess(User user, Order order) {
@@ -345,12 +316,7 @@ public class OrderService {
         order.changeStatus(nextStatus);
         entityManager.flush();
 
-        OrderStatusUpdateResponse response = new OrderStatusUpdateResponse();
-        response.setOrderId(order.getOrderId());
-        response.setOrderStatus(order.getOrderStatus().name());
-        response.setUpdatedAt(order.getUpdatedAt());
-
-        return response;
+        return OrderStatusUpdateResponse.of(order);
     }
 
     @Transactional
@@ -415,13 +381,7 @@ public class OrderService {
         order.changeStatus(OrderStatus.CANCELLED);
         entityManager.flush();
 
-        OrderCancelResponse response = new OrderCancelResponse();
-        response.setOrderId(order.getOrderId());
-        response.setOrderStatus(order.getOrderStatus().name());
-        response.setCanceledAt(order.getUpdatedAt());
-        response.setCancelReason(request.getCancelReason());
-
-        return response;
+        return OrderCancelResponse.of(order, request.getCancelReason());
     }
 
     @Transactional
