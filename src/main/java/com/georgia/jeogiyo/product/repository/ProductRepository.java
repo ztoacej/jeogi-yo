@@ -34,6 +34,18 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, Product
             @Param("quantity") int quantity
     );
 
+    @Modifying(flushAutomatically = true)
+    @Query("""
+        update Product p
+        set p.stock = p.stock + :quantity
+        where p.productId = :productId
+          and :quantity > 0
+        """)
+    int increaseStock(
+            @Param("productId") UUID productId,
+            @Param("quantity") int quantity
+    );
+
     List<Product> findAllByProductIdInAndIsDeletedFalse(List<UUID> productIds);
 }
 

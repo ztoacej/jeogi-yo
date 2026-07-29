@@ -313,6 +313,17 @@ public class OrderService {
             }
         }
 
+        int updatedRows = orderRepository.updateStatusIfCurrent(
+                orderId,
+                currentStatus,
+                nextStatus
+        );
+
+        if (updatedRows != 1) {
+            throw new BusinessException(GlobalErrorCode.INVALID_ORDER_STATUS_TRANSITION);
+        }
+
+        // bulk update 이후 응답에 사용할 영속 엔티티 상태를 맞춘다.
         order.changeStatus(nextStatus);
         entityManager.flush();
 
@@ -365,9 +376,10 @@ public class OrderService {
         // 조건부 상태 변경에 성공한 최초 요청만 재고 복구를 수행한다.
         List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
         for (OrderItem item : orderItems) {
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId()).orElse(null);
-            if (product != null) {
-                product.restoreStock(item.getQuantity());
+            int restoredRows = productRepository.increaseStock(item.getProductId(), item.getQuantity());
+
+            if (restoredRows != 1) {
+                throw new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT);
             }
         }
 
@@ -407,9 +419,10 @@ public class OrderService {
         // 조건부 상태 변경에 성공한 최초 요청만 재고 복구를 수행한다.
         List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
         for (OrderItem item : orderItems) {
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId()).orElse(null);
-            if (product != null) {
-                product.restoreStock(item.getQuantity());
+            int restoredRows = productRepository.increaseStock(item.getProductId(), item.getQuantity());
+
+            if (restoredRows != 1) {
+                throw new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT);
             }
         }
 
