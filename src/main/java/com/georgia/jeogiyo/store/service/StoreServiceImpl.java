@@ -195,19 +195,6 @@ public class StoreServiceImpl implements StoreService {
                 .build();
     }
 
-    //    private StoreSearchResponse toSearchResponse(Store store) {
-//        StoreReviewSummary reviewSummary = getReviewSummary(store.getStoreId());
-//
-//        return StoreSearchResponse.builder()
-//                .storeId(store.getStoreId())
-//                .categoryId(store.getCategory().getCategoryId())
-//                .categoryName(store.getCategory().getCategoryName())
-//                .storeName(store.getStoreName())
-//                .address(store.getAddress())
-//                .storeStatus(store.getStoreStatus())
-//                .averageRating(reviewSummary.averageRating())
-//                .build();
-//    }
     private StoreSearchResponse normalizeSearchResponse(StoreSearchResponse response) {
         return StoreSearchResponse.builder()
                 .storeId(response.getStoreId())
