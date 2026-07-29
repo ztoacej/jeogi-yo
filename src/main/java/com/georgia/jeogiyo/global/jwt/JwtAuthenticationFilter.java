@@ -15,6 +15,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 
 import java.io.IOException;
 
@@ -40,7 +42,7 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
         try {
             UserLoginRequest requestDto = new ObjectMapper().readValue(request.getInputStream(), UserLoginRequest.class);
 
-            return getAuthenticationManager().authenticate( // Spring Security의 인증 매니저에게 위임
+            return getAuthenticationManager().authenticate(
                     new UsernamePasswordAuthenticationToken(
                             requestDto.getLoginId(),
                             requestDto.getPassword(),
@@ -48,8 +50,21 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
                     )
             );
         } catch (IOException e) {
-            log.error(e.getMessage());
-            throw new RuntimeException(e.getMessage());
+            log.warn("Invalid login request body", e);
+            writeBadRequest(response, "요청 본문 형식이 올바르지 않습니다.");
+            return null;
+        }
+    }
+
+    private void writeBadRequest(HttpServletResponse response, String message) {
+        try {
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write(
+                    new ObjectMapper().writeValueAsString(CommonResponse.fail(message))
+            );
+        } catch (IOException e) {
+            throw new AuthenticationServiceException("Failed to write login error response", e);
         }
     }
 
