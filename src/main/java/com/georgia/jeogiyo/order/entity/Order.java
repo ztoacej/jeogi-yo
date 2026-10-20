@@ -72,7 +72,7 @@ public class Order extends BaseEntity {
         }
         this.orderStatus = OrderStatus.CANCELLED;
     }
-    // TODO: Payment 등 다른 도메인 정리 후 삭제 예정 (2026-07-14 임시 추가)
+    // 연관 엔티티의 식별자 접근 편의 메서드
     public UUID getUserId() {
         return this.user.getUserId();
     }

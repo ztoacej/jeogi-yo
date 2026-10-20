@@ -36,11 +36,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderService {
@@ -53,6 +53,7 @@ public class OrderService {
     private final JPAQueryFactory queryFactory;
     private final EntityManager entityManager;
     private final PaymentRepository paymentRepository;
+    private final DeliveryAreaValidator deliveryAreaValidator;
 
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_TRANSITIONS = Map.of(
             OrderStatus.ORDER_REQUESTED, Set.of(OrderStatus.ORDER_ACCEPTED, OrderStatus.ORDER_REJECTED),
@@ -65,7 +66,8 @@ public class OrderService {
 
     public OrderService(OrderRepository orderRepository, AddressRepository addressRepository, ProductRepository productRepository,
                         OrderItemRepository orderItemRepository, StoreRepository storeRepository, UserRepository userRepository,
-                        JPAQueryFactory queryFactory, EntityManager entityManager, PaymentRepository paymentRepository) {
+                        JPAQueryFactory queryFactory, EntityManager entityManager, PaymentRepository paymentRepository,
+                        DeliveryAreaValidator deliveryAreaValidator) {
         this.orderRepository = orderRepository;
         this.addressRepository = addressRepository;
         this.productRepository = productRepository;
@@ -75,6 +77,7 @@ public class OrderService {
         this.queryFactory = queryFactory;
         this.entityManager = entityManager;
         this.paymentRepository = paymentRepository;
+        this.deliveryAreaValidator = deliveryAreaValidator;
     }
 
     public Order getOrder(UUID orderId) {
@@ -92,65 +95,118 @@ public class OrderService {
             throw new BusinessException(GlobalErrorCode.FORBIDDEN);
         }
 
-        Store store = storeRepository.findByStoreIdAndIsDeletedFalse(orderCreateRequest.getStoreId())
+        Store store = storeRepository.findByStoreIdForUpdate(orderCreateRequest.getStoreId())
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_STORE));
 
-        if (store.isDeleted()) {
-            throw new BusinessException(GlobalErrorCode.NOT_FOUND_STORE);
-        }
         if (store.getStoreStatus() != StoreStatus.OPEN) {
             throw new BusinessException(GlobalErrorCode.STORE_NOT_OPEN);
         }
 
-        Address address = addressRepository.findByUserAndAddressIdAndIsDeletedFalse(user, orderCreateRequest.getAddressId())
+        Address address = addressRepository.findByUserAndAddressIdAndIsDeletedFalse(
+                        user,
+                        orderCreateRequest.getAddressId()
+                )
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.FORBIDDEN_ADDRESS));
 
-        DeliveryAreaValidator.validate(address.getRoadAddress());
+        deliveryAreaValidator.validate(address.getRoadAddress());
 
-        Integer totalPrice = 0;
+        if (orderCreateRequest.getItems() == null || orderCreateRequest.getItems().isEmpty()) {
+            throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
+        }
+
         for (OrderCreateRequest.OrderItemRequest item : orderCreateRequest.getItems()) {
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId())
-                    .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT));
+            if (item == null || item.getProductId() == null || item.getQuantity() == null || item.getQuantity() <= 0) {
+                throw new BusinessException(GlobalErrorCode.INVALID_INPUT_VALUE);
+            }
+        }
+
+        List<UUID> productIds = orderCreateRequest.getItems().stream()
+                .map(OrderCreateRequest.OrderItemRequest::getProductId)
+                .distinct()
+                .toList();
+
+        Map<UUID, Product> productMap = productRepository
+                .findAllByProductIdInAndIsDeletedFalse(productIds)
+                .stream()
+                .collect(Collectors.toMap(Product::getProductId, product -> product));
+
+        int totalPrice = 0;
+
+        for (OrderCreateRequest.OrderItemRequest item : orderCreateRequest.getItems()) {
+            Product product = productMap.get(item.getProductId());
+
+            if (product == null) {
+                throw new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT);
+            }
 
             if (!product.getStore().getStoreId().equals(store.getStoreId())) {
                 throw new BusinessException(GlobalErrorCode.PRODUCT_NOT_IN_STORE);
             }
+
             if (!product.isOrderable()) {
                 throw new BusinessException(GlobalErrorCode.PRODUCT_NOT_ORDERABLE);
             }
-            product.decreaseStock(item.getQuantity());
 
-            Integer itemTotalPrice = product.getPrice() * item.getQuantity();
-            totalPrice += itemTotalPrice;
+            int itemTotalPrice = calculateItemTotalPrice(product.getPrice(), item.getQuantity());
+            try {
+                totalPrice = Math.addExact(totalPrice, itemTotalPrice);
+            } catch (ArithmeticException e) {
+                throw new BusinessException(GlobalErrorCode.ORDER_AMOUNT_EXCEEDED);
+            }
+
+            // 조건부 UPDATE로 재고 차감 성공 여부를 DB에서 최종 검증한다.
+            int updatedRows = productRepository.decreaseStockIfEnough(
+                    item.getProductId(),
+                    store.getStoreId(),
+                    item.getQuantity()
+            );
+
+            if (updatedRows != 1) {
+                throw new BusinessException(GlobalErrorCode.INSUFFICIENT_STOCK);
+            }
         }
 
-        Order order = new Order(user, store, address,
-                address.getRoadAddress(), address.getDetailAddress(), address.getZipcode(),
-                totalPrice, OrderStatus.ORDER_REQUESTED);
+        Order order = new Order(
+                user,
+                store,
+                address,
+                address.getRoadAddress(),
+                address.getDetailAddress(),
+                address.getZipcode(),
+                totalPrice,
+                OrderStatus.ORDER_REQUESTED
+        );
+
         Order savedOrder = orderRepository.save(order);
 
         for (OrderCreateRequest.OrderItemRequest item : orderCreateRequest.getItems()) {
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId())
-                    .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT));
-            Integer itemTotalPrice = product.getPrice() * item.getQuantity();
+            Product product = productMap.get(item.getProductId());
+            int itemTotalPrice = calculateItemTotalPrice(product.getPrice(), item.getQuantity());
 
-            OrderItem orderItem = new OrderItem(savedOrder.getOrderId(), item.getProductId(), item.getQuantity(),
-                    product.getPrice(), itemTotalPrice);
+            OrderItem orderItem = new OrderItem(
+                    savedOrder.getOrderId(),
+                    item.getProductId(),
+                    product.getProductName(),
+                    item.getQuantity(),
+                    product.getPrice(),
+                    itemTotalPrice
+            );
+
             orderItemRepository.save(orderItem);
         }
 
-        OrderCreateResponse response = new OrderCreateResponse();
-        response.setOrderId(savedOrder.getOrderId());
-        response.setStoreId(savedOrder.getStore().getStoreId());
-        response.setAddress(savedOrder.getRoadAddress() + " " + savedOrder.getDetailAddress());
-        response.setOrderStatus(savedOrder.getOrderStatus().name());
-        response.setTotalPrice(savedOrder.getTotalPrice());
-        response.setCreatedAt(savedOrder.getCreatedAt());
-
-        return response;
+        return OrderCreateResponse.of(savedOrder);
     }
 
+    private int calculateItemTotalPrice(int unitPrice, int quantity) {
+        try {
+            return Math.multiplyExact(unitPrice, quantity);
+        } catch (ArithmeticException e) {
+            throw new BusinessException(GlobalErrorCode.ORDER_AMOUNT_EXCEEDED);
+        }
+    }
 
+    @Transactional(readOnly = true)
     public OrderDetailResponse getOrderDetail(String loginId, UUID orderId) {
 
         User user = userRepository.findByLoginIdAndIsDeletedFalse(loginId)
@@ -163,30 +219,7 @@ public class OrderService {
 
         List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
 
-        List<OrderDetailResponse.OrderItemResponse> itemResponses = new ArrayList<>();
-        for (OrderItem item : orderItems) {
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId())
-                    .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT));
-
-            OrderDetailResponse.OrderItemResponse itemResponse = new OrderDetailResponse.OrderItemResponse();
-            itemResponse.setProductId(item.getProductId());
-            itemResponse.setProductName(product.getProductName());
-            itemResponse.setQuantity(item.getQuantity());
-            itemResponse.setUnitPrice(item.getUnitPrice());
-            itemResponse.setItemTotalPrice(item.getItemTotalPrice());
-            itemResponses.add(itemResponse);
-        }
-
-        OrderDetailResponse response = new OrderDetailResponse();
-        response.setOrderId(order.getOrderId());
-        response.setStoreId(order.getStore().getStoreId());
-        response.setAddressId(order.getAddress().getAddressId());
-        response.setOrderStatus(order.getOrderStatus().name());
-        response.setTotalPrice(order.getTotalPrice());
-        response.setCreatedAt(order.getCreatedAt());
-        response.setItems(itemResponses);
-
-        return response;
+        return OrderDetailResponse.of(order, orderItems);
     }
 
     private void validateOrderAccess(User user, Order order) {
@@ -210,6 +243,7 @@ public class OrderService {
         throw new BusinessException(GlobalErrorCode.FORBIDDEN_ORDER);
     }
 
+    @Transactional(readOnly = true)
     public PageResponse<OrderSearchResponse> searchOrders(String loginId, OrderStatus orderStatus, Pageable pageable) {
 
         User user = userRepository.findByLoginIdAndIsDeletedFalse(loginId)
@@ -225,22 +259,13 @@ public class OrderService {
                     .fetch();
         }
 
-        Page<Order> orderPage = orderRepository.searchOrders(orderStatus, user.getRole(), user.getUserId(), storeIds, pageable);
+        Page<OrderSearchResponse> orderPage =
+                orderRepository.searchOrders(orderStatus, user.getRole(), user.getUserId(), storeIds, pageable);
 
-        return PageResponse.from(orderPage, order -> {
-            Store store = storeRepository.findByStoreIdAndIsDeletedFalse(order.getStore().getStoreId()).orElse(null);
-
-            OrderSearchResponse item = new OrderSearchResponse();
-            item.setOrderId(order.getOrderId());
-            item.setStoreId(order.getStore().getStoreId());
-            item.setStoreName(store != null ? store.getStoreName() : null);
-            item.setOrderStatus(order.getOrderStatus().name());
-            item.setTotalPrice(order.getTotalPrice());
-            item.setCreatedAt(order.getCreatedAt());
-            return item;
-        });
+        return PageResponse.from(orderPage, response -> response);
     }
 
+    @Transactional(readOnly = true)
     public PageResponse<OrderStoreSearchResponse> searchOrdersByStore(String loginId, UUID storeId, OrderStatus orderStatus, Pageable pageable) {
 
         User user = userRepository.findByLoginIdAndIsDeletedFalse(loginId)
@@ -257,19 +282,10 @@ public class OrderService {
             throw new BusinessException(GlobalErrorCode.FORBIDDEN);
         }
 
-        Page<Order> orderPage = orderRepository.searchOrdersByStore(storeId, orderStatus, pageable);
+        Page<OrderStoreSearchResponse> orderPage =
+                orderRepository.searchOrdersByStore(storeId, orderStatus, pageable);
 
-        return PageResponse.from(orderPage, order -> {
-            User customer = userRepository.findByUserIdAndIsDeletedFalse(order.getUser().getUserId()).orElse(null);
-
-            OrderStoreSearchResponse item = new OrderStoreSearchResponse();
-            item.setOrderId(order.getOrderId());
-            item.setCustomerName(customer != null ? customer.getNickname() : "탈퇴한 회원");
-            item.setOrderStatus(order.getOrderStatus().name());
-            item.setTotalPrice(order.getTotalPrice());
-            item.setCreatedAt(order.getCreatedAt());
-            return item;
-        });
+        return PageResponse.from(orderPage, response -> response);
     }
 
     @Transactional
@@ -309,15 +325,28 @@ public class OrderService {
             }
         }
 
+        int updatedRows = orderRepository.updateStatusIfCurrent(
+                orderId,
+                currentStatus,
+                nextStatus
+        );
+
+        if (updatedRows != 1) {
+            throw new BusinessException(GlobalErrorCode.INVALID_ORDER_STATUS_TRANSITION);
+        }
+
+        // 상태 전환에 성공한 요청만 재고와 결제를 정리한다.
+        // 결제 생성의 주문 행 잠금과 직렬화되므로 진행 중인 결제도 커밋 후 조회한다.
+        if (nextStatus == OrderStatus.ORDER_REJECTED) {
+            restoreStock(orderId);
+            cancelSuccessfulPayment(orderId, "가게 주문 거절");
+        }
+
+        // bulk update 이후 응답에 사용할 영속 엔티티 상태를 맞춘다.
         order.changeStatus(nextStatus);
         entityManager.flush();
 
-        OrderStatusUpdateResponse response = new OrderStatusUpdateResponse();
-        response.setOrderId(order.getOrderId());
-        response.setOrderStatus(order.getOrderStatus().name());
-        response.setUpdatedAt(order.getUpdatedAt());
-
-        return response;
+        return OrderStatusUpdateResponse.of(order);
     }
 
     @Transactional
@@ -340,9 +369,7 @@ public class OrderService {
             if (order.getOrderStatus() != OrderStatus.ORDER_REQUESTED) {
                 throw new BusinessException(GlobalErrorCode.ORDER_ALREADY_ACCEPTED);
             }
-            if (order.getCreatedAt().plusMinutes(5).isBefore(LocalDateTime.now())) {
-                throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_TIME_EXPIRED);
-            }
+            validateCustomerCancellationDeadline(order);
         } else {
             if (order.getOrderStatus() == OrderStatus.DELIVERED
                     || order.getOrderStatus() == OrderStatus.CANCELLED
@@ -351,34 +378,39 @@ public class OrderService {
             }
         }
 
-        List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
-        for (OrderItem item : orderItems) {
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId()).orElse(null);
-            if (product != null) {
-                product.restoreStock(item.getQuantity());
-            }
+        OrderStatus currentStatus = order.getOrderStatus();
+
+        int updatedRows = orderRepository.updateStatusIfCurrent(
+                orderId,
+                currentStatus,
+                OrderStatus.CANCELLED
+        );
+
+        if (updatedRows != 1) {
+            throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_NOT_ALLOWED);
         }
 
-        paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(orderId).ifPresent(payment -> {
-            if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
-                payment.cancel(request.getCancelReason());
-            }
-        });
+        // 조건부 상태 변경에 성공한 최초 요청만 재고 복구를 수행한다.
+        restoreStock(orderId);
 
+        cancelSuccessfulPayment(orderId, request.getCancelReason());
+
+        // bulk update 이후 응답/테스트에서 사용할 엔티티 상태를 맞춘다.
         order.changeStatus(OrderStatus.CANCELLED);
         entityManager.flush();
 
-        OrderCancelResponse response = new OrderCancelResponse();
-        response.setOrderId(order.getOrderId());
-        response.setOrderStatus(order.getOrderStatus().name());
-        response.setCanceledAt(order.getUpdatedAt());
-        response.setCancelReason(request.getCancelReason());
-
-        return response;
+        return OrderCancelResponse.of(order, request.getCancelReason());
     }
 
     @Transactional
     public void cancelByPayment(UUID orderId, String loginId) {
+
+        User user = userRepository.findByLoginIdAndIsDeletedFalse(loginId)
+                .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_USER));
+
+        if (user.getRole() != Role.CUSTOMER && user.getRole() != Role.MASTER) {
+            throw new BusinessException(GlobalErrorCode.FORBIDDEN);
+        }
 
         Order order = orderRepository.findByOrderIdAndIsDeletedFalse(orderId)
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_ORDER));
@@ -387,14 +419,53 @@ public class OrderService {
             throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_NOT_ALLOWED);
         }
 
-        List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
-        for (OrderItem item : orderItems) {
-            Product product = productRepository.findByProductIdAndIsDeletedFalse(item.getProductId()).orElse(null);
-            if (product != null) {
-                product.restoreStock(item.getQuantity());
+        // 결제 취소를 통한 주문 취소에도 동일한 고객 소유권·시간 제한을 적용한다.
+        // MASTER는 기존 정책대로 시간 제한 없이 취소할 수 있다.
+        if (user.getRole() == Role.CUSTOMER) {
+            if (!order.getUserId().equals(user.getUserId())) {
+                throw new BusinessException(GlobalErrorCode.FORBIDDEN_ORDER);
             }
+            validateCustomerCancellationDeadline(order);
         }
 
+        int updatedRows = orderRepository.updateStatusIfCurrent(
+                orderId,
+                OrderStatus.ORDER_REQUESTED,
+                OrderStatus.CANCELLED
+        );
+
+        if (updatedRows != 1) {
+            throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_NOT_ALLOWED);
+        }
+
+        // 조건부 상태 변경에 성공한 최초 요청만 재고 복구를 수행한다.
+        restoreStock(orderId);
+
         order.changeStatus(OrderStatus.CANCELLED);
+    }
+
+    private void validateCustomerCancellationDeadline(Order order) {
+        if (order.getCreatedAt().plusMinutes(5).isBefore(LocalDateTime.now())) {
+            throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_TIME_EXPIRED);
+        }
+    }
+
+    private void restoreStock(UUID orderId) {
+        List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
+        for (OrderItem item : orderItems) {
+            int restoredRows = productRepository.increaseStock(item.getProductId(), item.getQuantity());
+
+            if (restoredRows != 1) {
+                throw new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT);
+            }
+        }
+    }
+
+    private void cancelSuccessfulPayment(UUID orderId, String reason) {
+        paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(orderId).ifPresent(payment -> {
+            if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
+                payment.cancel(reason);
+            }
+        });
     }
 }

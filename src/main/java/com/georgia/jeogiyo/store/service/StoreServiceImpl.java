@@ -1,12 +1,15 @@
 package com.georgia.jeogiyo.store.service;
 
+import com.georgia.jeogiyo.order.entity.OrderStatus;
+import com.georgia.jeogiyo.order.repository.OrderRepository;
 import com.georgia.jeogiyo.category.entity.Category;
 import com.georgia.jeogiyo.category.repository.CategoryRepository;
 import com.georgia.jeogiyo.global.exception.BusinessException;
 import com.georgia.jeogiyo.global.exception.GlobalErrorCode;
 import com.georgia.jeogiyo.global.response.PageResponse;
 import com.georgia.jeogiyo.global.util.PageUtil;
-import com.georgia.jeogiyo.review.repository.ReviewRepository;
+import com.georgia.jeogiyo.review.service.ReviewSummary;
+import com.georgia.jeogiyo.review.service.ReviewSummaryReader;
 import com.georgia.jeogiyo.store.dto.request.StoreCreateRequest;
 import com.georgia.jeogiyo.store.dto.request.StoreStatusUpdateRequest;
 import com.georgia.jeogiyo.store.dto.request.StoreUpdateRequest;
@@ -39,8 +42,13 @@ public class StoreServiceImpl implements StoreService {
     private final StoreRepository storeRepository;
     private final UserFinder userFinder;
     private final CategoryRepository categoryRepository;
-    private final ReviewRepository reviewRepository;
+    private final ReviewSummaryReader reviewSummaryReader;
     private final EntityManager entityManager;
+    private final OrderRepository orderRepository;
+
+    private static final List<OrderStatus> TERMINAL_ORDER_STATUSES = List.of(
+            OrderStatus.ORDER_COMPLETED, OrderStatus.CANCELLED, OrderStatus.ORDER_REJECTED
+    );
 
     @Override
     public StoreResponse createStore(String loginId, StoreCreateRequest request) {
@@ -96,7 +104,7 @@ public class StoreServiceImpl implements StoreService {
     @Override
     public StoreResponse updateStore(UUID storeId, String loginId, StoreUpdateRequest request) {
         User user = userFinder.getUserByLoginId(loginId);
-        Store store = findStore(storeId);
+        Store store = findStoreForUpdate(storeId);
 
         validateOwnerOrMaster(user, store);
 
@@ -127,7 +135,7 @@ public class StoreServiceImpl implements StoreService {
     @Override
     public StoreResponse updateStoreStatus(UUID storeId, String loginId, StoreStatusUpdateRequest request) {
         User user = userFinder.getUserByLoginId(loginId);
-        Store store = findStore(storeId);
+        Store store = findStoreForUpdate(storeId);
 
         validateOwnerOrMaster(user, store);
 
@@ -142,9 +150,14 @@ public class StoreServiceImpl implements StoreService {
     @Override
     public void deleteStore(UUID storeId, String loginId) {
         User user = userFinder.getUserByLoginId(loginId);
-        Store store = findStore(storeId);
+        Store store = findStoreForUpdate(storeId);
 
         validateOwnerOrMaster(user, store);
+
+        if (orderRepository.existsByStore_StoreIdAndOrderStatusNotInAndIsDeletedFalse(
+                storeId, TERMINAL_ORDER_STATUSES)) {
+            throw new BusinessException(GlobalErrorCode.STORE_HAS_ACTIVE_ORDERS);
+        }
 
         store.softDelete(loginId);
 
@@ -153,7 +166,7 @@ public class StoreServiceImpl implements StoreService {
 
     // USER 탈퇴 로직에서 OWNER가 활성 가게를 가지고 있는지 확인합니다.
     // 활성 가게 기준은 isDeleted=false AND storeStatus IN (OPEN, CLOSED)입니다.
-    // OUT_OF_BUSINESS 상태의 가게는 탈퇴 가능한 상태로 봅니다.
+    // OUT_OF_BUSINESS는 활성 가게에서 제외하지만, 탈퇴 시 진행 중 주문도 별도로 검증합니다.
     @Override
     @Transactional(readOnly = true)
     public boolean existsActiveStoreByOwnerId(UUID ownerId) {
@@ -163,8 +176,22 @@ public class StoreServiceImpl implements StoreService {
         );
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public boolean existsActiveOrderByOwnerId(UUID ownerId) {
+        return orderRepository.existsByStore_Owner_UserIdAndOrderStatusNotInAndIsDeletedFalse(
+                ownerId, TERMINAL_ORDER_STATUSES
+        );
+    }
+
     private Store findStore(UUID storeId) {
         return storeRepository.findByStoreIdAndIsDeletedFalse(storeId)
+                .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_STORE));
+    }
+
+    // 수정·상태 변경·삭제가 같은 행 잠금을 사용하여 삭제된 상태의 덮어쓰기를 막는다.
+    private Store findStoreForUpdate(UUID storeId) {
+        return storeRepository.findByStoreIdForUpdate(storeId)
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_STORE));
     }
 
@@ -179,7 +206,7 @@ public class StoreServiceImpl implements StoreService {
     }
 
     private StoreResponse toResponse(Store store) {
-        StoreReviewSummary reviewSummary = getReviewSummary(store.getStoreId());
+        ReviewSummary reviewSummary = reviewSummaryReader.getSummary(store.getStoreId());
 
         return StoreResponse.builder()
                 .storeId(store.getStoreId())
@@ -195,19 +222,6 @@ public class StoreServiceImpl implements StoreService {
                 .build();
     }
 
-    //    private StoreSearchResponse toSearchResponse(Store store) {
-//        StoreReviewSummary reviewSummary = getReviewSummary(store.getStoreId());
-//
-//        return StoreSearchResponse.builder()
-//                .storeId(store.getStoreId())
-//                .categoryId(store.getCategory().getCategoryId())
-//                .categoryName(store.getCategory().getCategoryName())
-//                .storeName(store.getStoreName())
-//                .address(store.getAddress())
-//                .storeStatus(store.getStoreStatus())
-//                .averageRating(reviewSummary.averageRating())
-//                .build();
-//    }
     private StoreSearchResponse normalizeSearchResponse(StoreSearchResponse response) {
         return StoreSearchResponse.builder()
                 .storeId(response.getStoreId())
@@ -221,30 +235,4 @@ public class StoreServiceImpl implements StoreService {
                 .build();
     }
 
-    private Double roundAverage(Double averageRating) {
-        return averageRating == null ? 0.0 : Math.round(averageRating * 10.0) / 10.0;
-    }
-
-    private StoreReviewSummary getReviewSummary(UUID storeId) {
-        if (storeId == null) {
-            return new StoreReviewSummary(0, 0.0);
-        }
-
-        int reviewCount = Math.toIntExact(
-                reviewRepository.countByStore_StoreIdAndIsDeletedFalse(storeId)
-        );
-
-        Double averageRating = reviewRepository.findAverageRatingByStoreId(storeId);
-
-        return new StoreReviewSummary(
-                reviewCount,
-                roundAverage(averageRating)
-        );
-    }
-
-    private record StoreReviewSummary(
-            Integer reviewCount,
-            Double averageRating
-    ) {
-    }
 }

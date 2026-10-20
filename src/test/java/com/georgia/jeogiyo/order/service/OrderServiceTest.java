@@ -3,8 +3,11 @@ package com.georgia.jeogiyo.order.service;
 import com.georgia.jeogiyo.address.dto.request.AddressCreateRequest;
 import com.georgia.jeogiyo.address.entity.Address;
 import com.georgia.jeogiyo.address.repository.AddressRepository;
+import com.georgia.jeogiyo.category.entity.Category;
 import com.georgia.jeogiyo.global.exception.BusinessException;
+import com.georgia.jeogiyo.global.exception.GlobalErrorCode;
 import com.georgia.jeogiyo.global.response.PageResponse;
+import com.georgia.jeogiyo.global.util.DeliveryAreaValidator;
 import com.georgia.jeogiyo.global.util.PageUtil;
 import com.georgia.jeogiyo.order.dto.request.OrderCancelRequest;
 import com.georgia.jeogiyo.order.dto.request.OrderCreateRequest;
@@ -15,7 +18,6 @@ import com.georgia.jeogiyo.order.entity.OrderStatus;
 import com.georgia.jeogiyo.order.repository.OrderRepository;
 import com.georgia.jeogiyo.orderitem.entity.OrderItem;
 import com.georgia.jeogiyo.orderitem.repository.OrderItemRepository;
-import com.georgia.jeogiyo.category.entity.Category;
 import com.georgia.jeogiyo.payment.entity.Payment;
 import com.georgia.jeogiyo.payment.entity.PaymentMethod;
 import com.georgia.jeogiyo.payment.entity.PaymentStatus;
@@ -28,9 +30,7 @@ import com.georgia.jeogiyo.store.repository.StoreRepository;
 import com.georgia.jeogiyo.user.entity.Role;
 import com.georgia.jeogiyo.user.entity.User;
 import com.georgia.jeogiyo.user.repository.UserRepository;
-import com.georgia.jeogiyo.support.DomainTestFixture;
 import com.querydsl.jpa.impl.JPAQueryFactory;
-
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,11 +51,8 @@ import java.util.UUID;
 import static com.georgia.jeogiyo.support.DomainTestFixture.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.BDDMockito.then;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.BDDMockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class OrderServiceTest {
@@ -72,6 +69,7 @@ class OrderServiceTest {
     @Mock private JPAQueryFactory queryFactory;
     @Mock private EntityManager entityManager;
     @Mock private PaymentRepository paymentRepository;
+    @Mock private DeliveryAreaValidator deliveryAreaValidator;
 
     private OrderService orderService;
 
@@ -80,7 +78,7 @@ class OrderServiceTest {
         orderService = new OrderService(
                 orderRepository, addressRepository, productRepository,
                 orderItemRepository, storeRepository, userRepository,
-                queryFactory, entityManager, paymentRepository
+                queryFactory, entityManager, paymentRepository, deliveryAreaValidator
         );
     }
 
@@ -101,7 +99,10 @@ class OrderServiceTest {
     private Payment payment(PaymentStatus status) {
         Order order = order(customer(), store(owner(), category()), address(customer(), ADDRESS_ID, "서울특별시 종로구 세종대로 172"),
                 ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
-        return new Payment(order, customer(), PaymentMethod.CARD, 24000);
+
+        Payment payment = new Payment(order, customer(), PaymentMethod.CARD, 24000);
+        ReflectionTestUtils.setField(payment, "paymentStatus", status);
+        return payment;
     }
 
     private Product product(Store store, Category category, int price, int stock, boolean hidden) {
@@ -136,7 +137,28 @@ class OrderServiceTest {
     }
 
     private OrderItem orderItem(UUID orderId, UUID productId, Integer quantity, Integer unitPrice, Integer itemTotalPrice) {
-        return new OrderItem(orderId, productId, quantity, unitPrice, itemTotalPrice);
+        return new OrderItem(orderId, productId, "테스트 상품", quantity, unitPrice, itemTotalPrice);
+    }
+
+    private OrderSearchResponse orderSearchResponse() {
+        OrderSearchResponse response = new OrderSearchResponse();
+        response.setOrderId(ORDER_ID);
+        response.setStoreId(STORE_ID);
+        response.setStoreName("테스트 가게");
+        response.setOrderStatus("ORDER_REQUESTED");
+        response.setTotalPrice(24000);
+        response.setCreatedAt(LocalDateTime.now());
+        return response;
+    }
+
+    private OrderStoreSearchResponse orderStoreSearchResponse() {
+        OrderStoreSearchResponse response = new OrderStoreSearchResponse();
+        response.setOrderId(ORDER_ID);
+        response.setCustomerName("고객");
+        response.setOrderStatus("ORDER_REQUESTED");
+        response.setTotalPrice(24000);
+        response.setCreatedAt(LocalDateTime.now());
+        return response;
     }
 
     // ---------- 6-1: 주문 생성 ----------
@@ -153,9 +175,12 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
+        given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID)))
+                .willReturn(List.of(product));
+        given(productRepository.decreaseStockIfEnough(eq(PRODUCT_ID), eq(STORE_ID), anyInt()))
+                .willReturn(1);
         given(orderRepository.save(any(Order.class))).willAnswer(invocation -> {
             Order order = invocation.getArgument(0);
             ReflectionTestUtils.setField(order, "orderId", ORDER_ID);
@@ -167,7 +192,9 @@ class OrderServiceTest {
         assertThat(response.getOrderId()).isEqualTo(ORDER_ID);
         assertThat(response.getTotalPrice()).isEqualTo(24000);
         assertThat(response.getOrderStatus()).isEqualTo("ORDER_REQUESTED");
-        assertThat(product.getStock()).isEqualTo(28);
+
+        // 조건부 UPDATE 방식이므로 엔티티 stock 변경 대신 repository 호출 여부를 검증한다.
+        then(productRepository).should().decreaseStockIfEnough(PRODUCT_ID, STORE_ID, 2);
         then(orderItemRepository).should().save(any());
     }
 
@@ -189,7 +216,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.empty());
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
@@ -205,7 +232,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
@@ -222,7 +249,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID)))
                 .willReturn(Optional.empty());
 
@@ -242,8 +269,12 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(farAddress));
+
+        willThrow(new BusinessException(GlobalErrorCode.OUT_OF_SERVICE_AREA))
+                .given(deliveryAreaValidator)
+                .validate(farAddress.getRoadAddress());
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
@@ -263,10 +294,9 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(productFromOtherStore));
-
+        given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID))).willReturn(List.of(productFromOtherStore));
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("속하지 않은 상품");
@@ -284,9 +314,9 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(hiddenProduct));
+        given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID))).willReturn(List.of(hiddenProduct));
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
@@ -305,9 +335,13 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 5);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(lowStockProduct));
+        given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID)))
+                .willReturn(List.of(lowStockProduct));
+
+        given(productRepository.decreaseStockIfEnough(PRODUCT_ID, STORE_ID, 5))
+                .willReturn(0);
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
@@ -325,12 +359,10 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
-        Product product = product(store, category, 12000, 30, false);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
 
         OrderDetailResponse response = orderService.getOrderDetail(CUSTOMER_LOGIN_ID, ORDER_ID);
 
@@ -366,13 +398,11 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
-        Product product = product(store, category, 12000, 30, false);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(OWNER_LOGIN_ID)).willReturn(Optional.of(owner));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
 
         OrderDetailResponse response = orderService.getOrderDetail(OWNER_LOGIN_ID, ORDER_ID);
 
@@ -409,12 +439,10 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
-        Product product = product(store, category, 12000, 30, false);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(MASTER_LOGIN_ID)).willReturn(Optional.of(master));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
 
         OrderDetailResponse response = orderService.getOrderDetail(MASTER_LOGIN_ID, ORDER_ID);
 
@@ -449,16 +477,12 @@ class OrderServiceTest {
     @DisplayName("CUSTOMER는 본인 주문 목록을 조회할 수 있다")
     void searchOrders_customer_success() {
         User customer = customer();
-        Category category = category();
-        Store store = store(owner(), category);
-        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
-        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        OrderSearchResponse item = orderSearchResponse();
         Pageable pageable = PageUtil.toPageable(0, 10, "desc");
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.searchOrders(isNull(), eq(Role.CUSTOMER), eq(CUSTOMER_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of(order)));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+                .willReturn(new PageImpl<>(List.of(item)));
 
         PageResponse<OrderSearchResponse> response = orderService.searchOrders(CUSTOMER_LOGIN_ID, null, pageable);
 
@@ -470,17 +494,12 @@ class OrderServiceTest {
     @DisplayName("MASTER는 전체 주문 목록을 조회할 수 있다")
     void searchOrders_master_success() {
         User master = master();
-        User customer = customer();
-        Category category = category();
-        Store store = store(owner(), category);
-        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
-        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        OrderSearchResponse item = orderSearchResponse();
         Pageable pageable = PageUtil.toPageable(0, 10, "desc");
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(MASTER_LOGIN_ID)).willReturn(Optional.of(master));
         given(orderRepository.searchOrders(isNull(), eq(Role.MASTER), eq(MASTER_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of(order)));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+                .willReturn(new PageImpl<>(List.of(item)));
 
         PageResponse<OrderSearchResponse> response = orderService.searchOrders(MASTER_LOGIN_ID, null, pageable);
 
@@ -495,7 +514,7 @@ class OrderServiceTest {
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.searchOrders(isNull(), eq(Role.CUSTOMER), eq(CUSTOMER_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of()));
+                .willReturn(new PageImpl<OrderSearchResponse>(List.of()));
 
         orderService.searchOrders(CUSTOMER_LOGIN_ID, null, pageable);
 
@@ -521,18 +540,15 @@ class OrderServiceTest {
     @DisplayName("OWNER는 본인 가게의 주문 목록을 조회할 수 있다")
     void searchOrdersByStore_owner_success() {
         User owner = owner();
-        User customer = customer();
         Category category = category();
         Store store = store(owner, category);
-        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
-        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        OrderStoreSearchResponse item = orderStoreSearchResponse();
         Pageable pageable = PageUtil.toPageable(0, 10, "desc");
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(OWNER_LOGIN_ID)).willReturn(Optional.of(owner));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(orderRepository.searchOrdersByStore(eq(STORE_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of(order)));
-        given(userRepository.findByUserIdAndIsDeletedFalse(CUSTOMER_ID)).willReturn(Optional.of(customer));
+                .willReturn(new PageImpl<>(List.of(item)));
 
         PageResponse<OrderStoreSearchResponse> response = orderService.searchOrdersByStore(OWNER_LOGIN_ID, STORE_ID, null, pageable);
 
@@ -573,18 +589,15 @@ class OrderServiceTest {
     @DisplayName("MASTER는 모든 가게의 주문 목록을 조회할 수 있다")
     void searchOrdersByStore_master_success() {
         User master = master();
-        User customer = customer();
         Category category = category();
         Store store = store(owner(), category);
-        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
-        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        OrderStoreSearchResponse item = orderStoreSearchResponse();
         Pageable pageable = PageUtil.toPageable(0, 10, "desc");
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(MASTER_LOGIN_ID)).willReturn(Optional.of(master));
         given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
         given(orderRepository.searchOrdersByStore(eq(STORE_ID), isNull(), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of(order)));
-        given(userRepository.findByUserIdAndIsDeletedFalse(CUSTOMER_ID)).willReturn(Optional.of(customer));
+                .willReturn(new PageImpl<>(List.of(item)));
 
         PageResponse<OrderStoreSearchResponse> response = orderService.searchOrdersByStore(MASTER_LOGIN_ID, STORE_ID, null, pageable);
 
@@ -612,6 +625,11 @@ class OrderServiceTest {
 
         Payment payment = payment(PaymentStatus.SUCCESS);
         given(paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(payment));
+        given(orderRepository.updateStatusIfCurrent(
+                ORDER_ID,
+                OrderStatus.ORDER_REQUESTED,
+                OrderStatus.ORDER_ACCEPTED
+        )).willReturn(1);
 
         OrderStatusUpdateResponse response = orderService.updateOrderStatus(OWNER_LOGIN_ID, ORDER_ID, request);
 
@@ -633,6 +651,11 @@ class OrderServiceTest {
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(MASTER_LOGIN_ID)).willReturn(Optional.of(master));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(
+                ORDER_ID,
+                OrderStatus.ORDER_REQUESTED,
+                OrderStatus.ORDER_REJECTED
+        )).willReturn(1);
 
         OrderStatusUpdateResponse response = orderService.updateOrderStatus(MASTER_LOGIN_ID, ORDER_ID, request);
 
@@ -708,7 +731,6 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
-        Product product = product(store, category, 12000, 28, false);
         Payment payment = payment(PaymentStatus.SUCCESS);
 
         OrderCancelRequest request = new OrderCancelRequest();
@@ -716,16 +738,46 @@ class OrderServiceTest {
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(ORDER_ID, OrderStatus.ORDER_REQUESTED, OrderStatus.CANCELLED)).willReturn(1);
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
+        given(productRepository.increaseStock(PRODUCT_ID, 2)).willReturn(1);
         given(paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(payment));
 
         OrderCancelResponse response = orderService.cancelOrder(CUSTOMER_LOGIN_ID, ORDER_ID, request);
+        then(productRepository).should().increaseStock(PRODUCT_ID, 2);
 
         assertThat(response.getOrderStatus()).isEqualTo("CANCELLED");
-        assertThat(product.getStock()).isEqualTo(30);
         assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.CANCEL);
         assertThat(payment.getCancelReason()).isEqualTo("고객 변심");
+    }
+
+    @Test
+    @DisplayName("주문 취소는 이미 다른 요청이 취소한 주문이면 재고를 복구하지 않는다")
+    void cancelOrder_alreadyCanceledByOtherRequest_fail() {
+        User customer = customer();
+        Category category = category();
+        Store store = store(owner(), category);
+        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
+        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+
+        OrderCancelRequest request = new OrderCancelRequest();
+        request.setCancelReason("중복 취소 요청");
+
+        given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
+        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(
+                ORDER_ID,
+                OrderStatus.ORDER_REQUESTED,
+                OrderStatus.CANCELLED
+        )).willReturn(0);
+
+        assertThatThrownBy(() -> orderService.cancelOrder(CUSTOMER_LOGIN_ID, ORDER_ID, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("취소할 수 없는 상태");
+
+        then(orderItemRepository).shouldHaveNoInteractions();
+        then(productRepository).shouldHaveNoInteractions();
+        then(paymentRepository).shouldHaveNoInteractions();
     }
 
     @Test
@@ -796,16 +848,17 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_ACCEPTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
-        Product product = product(store, category, 12000, 28, false);
 
         OrderCancelRequest request = new OrderCancelRequest();
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(MASTER_LOGIN_ID)).willReturn(Optional.of(master));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(ORDER_ID, OrderStatus.ORDER_ACCEPTED, OrderStatus.CANCELLED)).willReturn(1);
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
+        given(productRepository.increaseStock(PRODUCT_ID, 2)).willReturn(1);
 
         OrderCancelResponse response = orderService.cancelOrder(MASTER_LOGIN_ID, ORDER_ID, request);
+        then(productRepository).should().increaseStock(PRODUCT_ID, 2);
 
         assertThat(response.getOrderStatus()).isEqualTo("CANCELLED");
     }
@@ -821,16 +874,43 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
-        Product product = product(store, category, 12000, 28, false);
 
+        given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(ORDER_ID, OrderStatus.ORDER_REQUESTED, OrderStatus.CANCELLED)).willReturn(1);
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
-        given(productRepository.findByProductIdAndIsDeletedFalse(PRODUCT_ID)).willReturn(Optional.of(product));
+        given(productRepository.increaseStock(PRODUCT_ID, 2)).willReturn(1);
 
         orderService.cancelByPayment(ORDER_ID, CUSTOMER_LOGIN_ID);
+        then(productRepository).should().increaseStock(PRODUCT_ID, 2);
 
         assertThat(order.getOrderStatus()).isEqualTo(OrderStatus.CANCELLED);
-        assertThat(product.getStock()).isEqualTo(30);
+
+    }
+
+    @Test
+    @DisplayName("cancelByPayment는 이미 다른 요청이 취소한 주문이면 재고를 복구하지 않는다")
+    void cancelByPayment_alreadyCanceledByOtherRequest_fail() {
+        User customer = customer();
+        Category category = category();
+        Store store = store(owner(), category);
+        Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
+        Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+
+        given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
+        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.updateStatusIfCurrent(
+                ORDER_ID,
+                OrderStatus.ORDER_REQUESTED,
+                OrderStatus.CANCELLED
+        )).willReturn(0);
+
+        assertThatThrownBy(() -> orderService.cancelByPayment(ORDER_ID, CUSTOMER_LOGIN_ID))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("취소할 수 없는 상태");
+
+        then(orderItemRepository).shouldHaveNoInteractions();
+        then(productRepository).shouldHaveNoInteractions();
     }
 
     @Test
@@ -842,10 +922,36 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_ACCEPTED, 24000);
 
+        given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.cancelByPayment(ORDER_ID, CUSTOMER_LOGIN_ID))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("취소할 수 없는 상태");
+    }
+
+    @Test
+    @DisplayName("cancelByPayment는 OWNER 요청을 거절한다")
+    void cancelByPayment_owner_forbidden() {
+        given(userRepository.findByLoginIdAndIsDeletedFalse(OWNER_LOGIN_ID)).willReturn(Optional.of(owner()));
+        assertThatThrownBy(() -> orderService.cancelByPayment(ORDER_ID, OWNER_LOGIN_ID))
+                .isInstanceOf(BusinessException.class).hasMessage(GlobalErrorCode.FORBIDDEN.getMessage());
+        then(orderRepository).shouldHaveNoInteractions();
+        then(productRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("cancelByPayment는 다른 고객의 주문을 취소할 수 없다")
+    void cancelByPayment_otherCustomer_forbidden() {
+        User customer = customer();
+        Store store = store(owner(), category());
+        Order order = order(customer, store, address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172"),
+                ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        given(userRepository.findByLoginIdAndIsDeletedFalse(OTHER_CUSTOMER_LOGIN_ID)).willReturn(Optional.of(otherCustomer()));
+        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        assertThatThrownBy(() -> orderService.cancelByPayment(ORDER_ID, OTHER_CUSTOMER_LOGIN_ID))
+                .isInstanceOf(BusinessException.class).hasMessage(GlobalErrorCode.FORBIDDEN_ORDER.getMessage());
+        then(orderRepository).should(never()).updateStatusIfCurrent(any(), any(), any());
+        then(productRepository).shouldHaveNoInteractions();
     }
 }

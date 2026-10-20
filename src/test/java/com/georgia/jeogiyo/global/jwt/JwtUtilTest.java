@@ -27,10 +27,9 @@ class JwtUtilTest {
     }
 
     @Test
-    @DisplayName("Bearer 접두어가 없는 토큰은 subString 시 예외가 발생한다")
-    void subStringTokenThrowsException() {
-        assertThatThrownBy(() -> jwtUtil.subStringToken("invalid-token"))
-                .isInstanceOf(NullPointerException.class);
+    @DisplayName("Bearer 접두어가 없는 토큰은 subString 시 null을 반환한다")
+    void subStringTokenWithoutBearerReturnsNull() {
+        assertThat(jwtUtil.subStringToken("invalid-token")).isNull();
     }
 
     @Test

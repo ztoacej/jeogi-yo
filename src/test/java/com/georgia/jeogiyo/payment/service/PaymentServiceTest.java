@@ -75,7 +75,7 @@ class PaymentServiceTest {
         PaymentCreateRequest request = DomainTestFixture.paymentCreateRequest(PaymentMethod.CARD);
 
         given(userFinder.getUserByLoginId(CUSTOMER_LOGIN_ID)).willReturn(customer);
-        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.findByOrderIdForUpdate(ORDER_ID)).willReturn(Optional.of(order));
         given(paymentRepository.existsByOrder_OrderId(ORDER_ID)).willReturn(false);
         given(paymentRepository.save(any(Payment.class))).willAnswer(invocation -> {
             Payment payment = invocation.getArgument(0);
@@ -117,7 +117,7 @@ class PaymentServiceTest {
         PaymentCreateRequest request = DomainTestFixture.paymentCreateRequest(PaymentMethod.CARD);
 
         given(userFinder.getUserByLoginId(CUSTOMER_LOGIN_ID)).willReturn(customer);
-        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(otherCustomerOrder));
+        given(orderRepository.findByOrderIdForUpdate(ORDER_ID)).willReturn(Optional.of(otherCustomerOrder));
 
         assertThatThrownBy(() -> paymentService.createPayment(ORDER_ID, CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
@@ -134,7 +134,7 @@ class PaymentServiceTest {
         PaymentCreateRequest request = DomainTestFixture.paymentCreateRequest(PaymentMethod.CARD);
 
         given(userFinder.getUserByLoginId(CUSTOMER_LOGIN_ID)).willReturn(customer);
-        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        given(orderRepository.findByOrderIdForUpdate(ORDER_ID)).willReturn(Optional.of(order));
         given(paymentRepository.existsByOrder_OrderId(ORDER_ID)).willReturn(true);
 
         assertThatThrownBy(() -> paymentService.createPayment(ORDER_ID, CUSTOMER_LOGIN_ID, request))
@@ -152,7 +152,7 @@ class PaymentServiceTest {
         PaymentCreateRequest request = DomainTestFixture.paymentCreateRequest(PaymentMethod.CARD);
 
         given(userFinder.getUserByLoginId(CUSTOMER_LOGIN_ID)).willReturn(customer);
-        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(acceptedOrder));
+        given(orderRepository.findByOrderIdForUpdate(ORDER_ID)).willReturn(Optional.of(acceptedOrder));
 
         assertThatThrownBy(() -> paymentService.createPayment(ORDER_ID, CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)

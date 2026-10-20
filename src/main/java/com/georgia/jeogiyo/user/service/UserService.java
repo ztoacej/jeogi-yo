@@ -128,6 +128,9 @@ public class UserService {
 					throw new BusinessException(GlobalErrorCode.DELETE_FAILURE_LAST_MASTER);
 				}
 			} else if(user.isOwner()) {
+				if(storeService.existsActiveOrderByOwnerId(user.getUserId())) {
+					throw new BusinessException(GlobalErrorCode.DELETE_FAILURE_ACTIVE_ORDERS);
+				}
 				if(storeService.existsActiveStoreByOwnerId(user.getUserId())) {
 					throw new BusinessException(GlobalErrorCode.DELETE_FAILURE_OPEN_STORES);
 				}

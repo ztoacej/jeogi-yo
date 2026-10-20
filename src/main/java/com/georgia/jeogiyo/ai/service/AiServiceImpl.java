@@ -150,9 +150,11 @@ public class AiServiceImpl implements AiService {
     }
 
     private AiHistoryResponse toHistoryResponse(AiHistory aiHistory) {
+        // 상품 등록 중 AI 생성이 실패하면 상품 없이 실패 이력만 남는다.
+        Product product = aiHistory.getProduct();
         return AiHistoryResponse.builder()
                 .aiHistoryId(aiHistory.getAiHistoryId())
-                .productId(aiHistory.getProduct().getProductId())
+                .productId(product == null ? null : product.getProductId())
                 .userId(aiHistory.getUser().getUserId())
                 .requestText(aiHistory.getRequestText())
                 .responseText(aiHistory.getResponseText())

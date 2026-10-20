@@ -53,7 +53,7 @@ public class Address extends BaseEntity {
 		
 		address.user = Objects.requireNonNull(user);
 		address.roadAddress = Objects.requireNonNull(addressCreate.getRoadAddress());
-		address.detailAddress = Objects.requireNonNull(addressCreate.getDetailAddress());
+		address.detailAddress = addressCreate.getDetailAddress();
 		address.zipcode = Objects.requireNonNull(addressCreate.getZipcode());
 		
 		if(addressCreate.getIsDefault() != null) {

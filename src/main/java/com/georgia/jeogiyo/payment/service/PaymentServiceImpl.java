@@ -48,7 +48,9 @@ public class PaymentServiceImpl implements PaymentService {
         User user = userFinder.getUserByLoginId(loginId);
         validateCustomer(user);
 
-        Order order = findOrderById(orderId);
+        // 트랜잭션 종료까지 주문 행을 잠가, 취소와 결제 저장 사이의 경합을 막는다.
+        Order order = orderRepository.findByOrderIdForUpdate(orderId)
+                .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_ORDER));
         validateOrderOwner(order, user);
         validatePayableOrder(order);
 
@@ -122,8 +124,9 @@ public class PaymentServiceImpl implements PaymentService {
         Order order = findOrderById(payment.getOrderId());
         validateCancelableOrder(order);
 
-        payment.cancel(request.getCancelReason());
+        // 주문 취소 선점 → 재고 복구 → 결제 취소 순서로 처리한다.
         orderService.cancelByPayment(order.getOrderId(), loginId);
+        payment.cancel(request.getCancelReason());
         entityManager.flush();
 
         log.info("Payment canceled. paymentId={}, orderId={}, canceledBy={}",

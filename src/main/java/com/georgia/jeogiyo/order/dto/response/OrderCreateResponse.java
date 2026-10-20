@@ -1,5 +1,6 @@
 package com.georgia.jeogiyo.order.dto.response;
 
+import com.georgia.jeogiyo.order.entity.Order;
 import com.georgia.jeogiyo.order.entity.OrderStatus;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
@@ -20,4 +21,15 @@ public class OrderCreateResponse {
     private String orderStatus;
     private Integer totalPrice;
     private LocalDateTime createdAt;
+
+    public static OrderCreateResponse of(Order order) {
+        OrderCreateResponse response = new OrderCreateResponse();
+        response.setOrderId(order.getOrderId());
+        response.setStoreId(order.getStore().getStoreId());
+        response.setAddress(order.getRoadAddress() + " " + order.getDetailAddress());
+        response.setOrderStatus(order.getOrderStatus().name());
+        response.setTotalPrice(order.getTotalPrice());
+        response.setCreatedAt(order.getCreatedAt());
+        return response;
+    }
 }

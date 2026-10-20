@@ -23,6 +23,7 @@ public enum GlobalErrorCode implements ErrorCode {
     DELETED_USER(HttpStatus.UNAUTHORIZED, "탈퇴한 회원입니다."),
     ALREADY_DELETED_USER(HttpStatus.CONFLICT, "이미 탈퇴한 회원입니다."),
     DELETE_FAILURE_LAST_MASTER(HttpStatus.CONFLICT, "현재 마지막 관리자이므로 회원탈퇴가 불가능합니다."),
+    DELETE_FAILURE_ACTIVE_ORDERS(HttpStatus.CONFLICT, "진행 중인 주문을 모두 처리한 후 탈퇴할 수 있습니다."),
     DELETE_FAILURE_OPEN_STORES(HttpStatus.CONFLICT, "먼저 가게 삭제/폐업 처리 후 MASTER에게 문의하세요."),
 
     // 배송지
@@ -42,6 +43,7 @@ public enum GlobalErrorCode implements ErrorCode {
     NOT_FOUND_STORE(HttpStatus.NOT_FOUND, "존재하지 않는 가게입니다."),
     FORBIDDEN_STORE(HttpStatus.FORBIDDEN, "본인의 가게가 아닙니다."),
     INVALID_STORE_STATUS(HttpStatus.CONFLICT, "허용되지 않은 가게 상태 변경입니다."),
+    STORE_HAS_ACTIVE_ORDERS(HttpStatus.CONFLICT, "진행 중인 주문이 있는 가게는 삭제할 수 없습니다."),
     ALREADY_DELETED_STORE(HttpStatus.CONFLICT, "이미 삭제된 가게입니다."),
 
     // 상품
@@ -56,6 +58,7 @@ public enum GlobalErrorCode implements ErrorCode {
     NOT_FOUND_ORDER(HttpStatus.NOT_FOUND, "존재하지 않는 주문입니다."),
     FORBIDDEN_ORDER(HttpStatus.FORBIDDEN, "해당 주문에 접근할 권한이 없습니다."),
     STORE_NOT_OPEN(HttpStatus.CONFLICT, "영업중인 가게가 아닙니다."),
+    ORDER_AMOUNT_EXCEEDED(HttpStatus.BAD_REQUEST, "주문 금액은 2,147,483,647원을 초과할 수 없습니다."),
     INSUFFICIENT_STOCK(HttpStatus.CONFLICT, "상품 재고가 부족합니다."),
     INVALID_ORDER_STATUS_TRANSITION(HttpStatus.CONFLICT, "허용되지 않은 주문 상태 변경입니다."),
     ORDER_CANCEL_NOT_ALLOWED(HttpStatus.CONFLICT, "주문을 취소할 수 없는 상태입니다."),

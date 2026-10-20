@@ -79,12 +79,19 @@ public class SecurityConfig {
         http.addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
 
         // 인증 실패(토큰 없음) 시 공통 응답 포맷으로 401 반환
-        http.exceptionHandling(exceptionHandling->
-                exceptionHandling.authenticationEntryPoint((request, response, authException) -> {
-                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED); // 401
+        http.exceptionHandling(exceptionHandling -> exceptionHandling
+                .authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                     response.setContentType("application/json;charset=UTF-8");
                     response.getWriter().write(
                             new ObjectMapper().writeValueAsString(CommonResponse.fail("인증이 필요합니다."))
+                    );
+                })
+                .accessDeniedHandler((request, response, accessDeniedException) -> {
+                    response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write(
+                            new ObjectMapper().writeValueAsString(CommonResponse.fail("해당 요청에 대한 권한이 없습니다."))
                     );
                 })
         );
