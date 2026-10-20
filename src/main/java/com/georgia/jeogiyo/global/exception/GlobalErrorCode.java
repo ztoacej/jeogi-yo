@@ -42,6 +42,7 @@ public enum GlobalErrorCode implements ErrorCode {
     NOT_FOUND_STORE(HttpStatus.NOT_FOUND, "존재하지 않는 가게입니다."),
     FORBIDDEN_STORE(HttpStatus.FORBIDDEN, "본인의 가게가 아닙니다."),
     INVALID_STORE_STATUS(HttpStatus.CONFLICT, "허용되지 않은 가게 상태 변경입니다."),
+    STORE_HAS_ACTIVE_ORDERS(HttpStatus.CONFLICT, "진행 중인 주문이 있는 가게는 삭제할 수 없습니다."),
     ALREADY_DELETED_STORE(HttpStatus.CONFLICT, "이미 삭제된 가게입니다."),
 
     // 상품

@@ -175,7 +175,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
         given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID)))
                 .willReturn(List.of(product));
@@ -216,7 +216,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.empty());
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
@@ -232,7 +232,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
 
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
                 .isInstanceOf(BusinessException.class)
@@ -249,7 +249,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID)))
                 .willReturn(Optional.empty());
 
@@ -269,7 +269,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(farAddress));
 
         willThrow(new BusinessException(GlobalErrorCode.OUT_OF_SERVICE_AREA))
@@ -294,7 +294,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
         given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID))).willReturn(List.of(productFromOtherStore));
         assertThatThrownBy(() -> orderService.createOrder(CUSTOMER_LOGIN_ID, request))
@@ -314,7 +314,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 2);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
         given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID))).willReturn(List.of(hiddenProduct));
 
@@ -335,7 +335,7 @@ class OrderServiceTest {
         OrderCreateRequest request = orderRequest(STORE_ID, ADDRESS_ID, PRODUCT_ID, 5);
 
         given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
-        given(storeRepository.findByStoreIdAndIsDeletedFalse(STORE_ID)).willReturn(Optional.of(store));
+        given(storeRepository.findByStoreIdForUpdate(STORE_ID)).willReturn(Optional.of(store));
         given(addressRepository.findByUserAndAddressIdAndIsDeletedFalse(any(User.class), eq(ADDRESS_ID))).willReturn(Optional.of(address));
         given(productRepository.findAllByProductIdInAndIsDeletedFalse(List.of(PRODUCT_ID)))
                 .willReturn(List.of(lowStockProduct));

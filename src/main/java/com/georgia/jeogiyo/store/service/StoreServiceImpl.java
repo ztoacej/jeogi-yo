@@ -1,5 +1,7 @@
 package com.georgia.jeogiyo.store.service;
 
+import com.georgia.jeogiyo.order.entity.OrderStatus;
+import com.georgia.jeogiyo.order.repository.OrderRepository;
 import com.georgia.jeogiyo.category.entity.Category;
 import com.georgia.jeogiyo.category.repository.CategoryRepository;
 import com.georgia.jeogiyo.global.exception.BusinessException;
@@ -42,6 +44,11 @@ public class StoreServiceImpl implements StoreService {
     private final CategoryRepository categoryRepository;
     private final ReviewSummaryReader reviewSummaryReader;
     private final EntityManager entityManager;
+    private final OrderRepository orderRepository;
+
+    private static final List<OrderStatus> TERMINAL_ORDER_STATUSES = List.of(
+            OrderStatus.ORDER_COMPLETED, OrderStatus.CANCELLED, OrderStatus.ORDER_REJECTED
+    );
 
     @Override
     public StoreResponse createStore(String loginId, StoreCreateRequest request) {
@@ -143,9 +150,15 @@ public class StoreServiceImpl implements StoreService {
     @Override
     public void deleteStore(UUID storeId, String loginId) {
         User user = userFinder.getUserByLoginId(loginId);
-        Store store = findStore(storeId);
+        Store store = storeRepository.findByStoreIdForUpdate(storeId)
+                .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_STORE));
 
         validateOwnerOrMaster(user, store);
+
+        if (orderRepository.existsByStore_StoreIdAndOrderStatusNotInAndIsDeletedFalse(
+                storeId, TERMINAL_ORDER_STATUSES)) {
+            throw new BusinessException(GlobalErrorCode.STORE_HAS_ACTIVE_ORDERS);
+        }
 
         store.softDelete(loginId);
 

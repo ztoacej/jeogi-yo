@@ -95,7 +95,7 @@ public class OrderService {
             throw new BusinessException(GlobalErrorCode.FORBIDDEN);
         }
 
-        Store store = storeRepository.findByStoreIdAndIsDeletedFalse(orderCreateRequest.getStoreId())
+        Store store = storeRepository.findByStoreIdForUpdate(orderCreateRequest.getStoreId())
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_STORE));
 
         if (store.getStoreStatus() != StoreStatus.OPEN) {

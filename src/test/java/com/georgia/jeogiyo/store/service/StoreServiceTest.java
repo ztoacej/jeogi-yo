@@ -15,6 +15,7 @@ import com.georgia.jeogiyo.store.dto.response.StoreSearchResponse;
 import com.georgia.jeogiyo.store.entity.Store;
 import com.georgia.jeogiyo.store.entity.StoreStatus;
 import com.georgia.jeogiyo.store.repository.StoreRepository;
+import com.georgia.jeogiyo.order.repository.OrderRepository;
 import com.georgia.jeogiyo.support.DomainTestFixture;
 import com.georgia.jeogiyo.user.entity.User;
 import com.georgia.jeogiyo.user.service.UserFinder;
@@ -72,6 +73,8 @@ class StoreServiceTest {
     @Mock
     private EntityManager entityManager;
 
+    @Mock private OrderRepository orderRepository;
+
     private StoreServiceImpl storeService;
 
     @BeforeEach
@@ -81,7 +84,8 @@ class StoreServiceTest {
                 userFinder,
                 categoryRepository,
                 reviewSummaryReader,
-                entityManager
+                entityManager,
+                orderRepository
         );
     }
 

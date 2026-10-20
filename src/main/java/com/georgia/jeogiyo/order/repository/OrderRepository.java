@@ -9,11 +9,16 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface OrderRepository extends JpaRepository<Order, UUID>, OrderRepositoryCustom {
     Optional<Order> findByOrderIdAndIsDeletedFalse(UUID orderId);
+
+    boolean existsByStore_StoreIdAndOrderStatusNotInAndIsDeletedFalse(
+            UUID storeId, Collection<OrderStatus> terminalStatuses
+    );
 
     // 결제 생성의 상태 검증부터 저장까지 주문 취소 UPDATE와 직렬화한다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
