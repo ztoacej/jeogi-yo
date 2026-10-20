@@ -56,6 +56,7 @@ public enum GlobalErrorCode implements ErrorCode {
     NOT_FOUND_ORDER(HttpStatus.NOT_FOUND, "존재하지 않는 주문입니다."),
     FORBIDDEN_ORDER(HttpStatus.FORBIDDEN, "해당 주문에 접근할 권한이 없습니다."),
     STORE_NOT_OPEN(HttpStatus.CONFLICT, "영업중인 가게가 아닙니다."),
+    ORDER_AMOUNT_EXCEEDED(HttpStatus.BAD_REQUEST, "주문 금액은 2,147,483,647원을 초과할 수 없습니다."),
     INSUFFICIENT_STOCK(HttpStatus.CONFLICT, "상품 재고가 부족합니다."),
     INVALID_ORDER_STATUS_TRANSITION(HttpStatus.CONFLICT, "허용되지 않은 주문 상태 변경입니다."),
     ORDER_CANCEL_NOT_ALLOWED(HttpStatus.CONFLICT, "주문을 취소할 수 없는 상태입니다."),

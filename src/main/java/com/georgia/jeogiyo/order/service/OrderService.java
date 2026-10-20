@@ -130,7 +130,7 @@ public class OrderService {
                 .stream()
                 .collect(Collectors.toMap(Product::getProductId, product -> product));
 
-        Integer totalPrice = 0;
+        int totalPrice = 0;
 
         for (OrderCreateRequest.OrderItemRequest item : orderCreateRequest.getItems()) {
             Product product = productMap.get(item.getProductId());
@@ -147,6 +147,13 @@ public class OrderService {
                 throw new BusinessException(GlobalErrorCode.PRODUCT_NOT_ORDERABLE);
             }
 
+            int itemTotalPrice = calculateItemTotalPrice(product.getPrice(), item.getQuantity());
+            try {
+                totalPrice = Math.addExact(totalPrice, itemTotalPrice);
+            } catch (ArithmeticException e) {
+                throw new BusinessException(GlobalErrorCode.ORDER_AMOUNT_EXCEEDED);
+            }
+
             // 조건부 UPDATE로 재고 차감 성공 여부를 DB에서 최종 검증한다.
             int updatedRows = productRepository.decreaseStockIfEnough(
                     item.getProductId(),
@@ -157,9 +164,6 @@ public class OrderService {
             if (updatedRows != 1) {
                 throw new BusinessException(GlobalErrorCode.INSUFFICIENT_STOCK);
             }
-
-            Integer itemTotalPrice = product.getPrice() * item.getQuantity();
-            totalPrice += itemTotalPrice;
         }
 
         Order order = new Order(
@@ -177,7 +181,7 @@ public class OrderService {
 
         for (OrderCreateRequest.OrderItemRequest item : orderCreateRequest.getItems()) {
             Product product = productMap.get(item.getProductId());
-            Integer itemTotalPrice = product.getPrice() * item.getQuantity();
+            int itemTotalPrice = calculateItemTotalPrice(product.getPrice(), item.getQuantity());
 
             OrderItem orderItem = new OrderItem(
                     savedOrder.getOrderId(),
@@ -192,6 +196,14 @@ public class OrderService {
         }
 
         return OrderCreateResponse.of(savedOrder);
+    }
+
+    private int calculateItemTotalPrice(int unitPrice, int quantity) {
+        try {
+            return Math.multiplyExact(unitPrice, quantity);
+        } catch (ArithmeticException e) {
+            throw new BusinessException(GlobalErrorCode.ORDER_AMOUNT_EXCEEDED);
+        }
     }
 
     @Transactional(readOnly = true)
