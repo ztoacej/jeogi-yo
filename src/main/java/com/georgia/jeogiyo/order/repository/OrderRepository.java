@@ -2,7 +2,9 @@ package com.georgia.jeogiyo.order.repository;
 
 import com.georgia.jeogiyo.order.entity.Order;
 import com.georgia.jeogiyo.order.entity.OrderStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,6 +14,11 @@ import java.util.UUID;
 
 public interface OrderRepository extends JpaRepository<Order, UUID>, OrderRepositoryCustom {
     Optional<Order> findByOrderIdAndIsDeletedFalse(UUID orderId);
+
+    // 결제 생성의 상태 검증부터 저장까지 주문 취소 UPDATE와 직렬화한다.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from Order o where o.orderId = :orderId and o.isDeleted = false")
+    Optional<Order> findByOrderIdForUpdate(@Param("orderId") UUID orderId);
 
     @Modifying(flushAutomatically = true)
     @Query("""

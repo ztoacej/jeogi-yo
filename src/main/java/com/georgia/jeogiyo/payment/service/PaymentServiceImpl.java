@@ -48,7 +48,9 @@ public class PaymentServiceImpl implements PaymentService {
         User user = userFinder.getUserByLoginId(loginId);
         validateCustomer(user);
 
-        Order order = findOrderById(orderId);
+        // 트랜잭션 종료까지 주문 행을 잠가, 취소와 결제 저장 사이의 경합을 막는다.
+        Order order = orderRepository.findByOrderIdForUpdate(orderId)
+                .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_ORDER));
         validateOrderOwner(order, user);
         validatePayableOrder(order);
 
