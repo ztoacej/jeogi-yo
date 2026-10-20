@@ -30,4 +30,6 @@ public interface StoreService {
     void deleteStore(UUID storeId, String loginId);
 
     boolean existsActiveStoreByOwnerId(UUID ownerId);
+
+    boolean existsActiveOrderByOwnerId(UUID ownerId);
 }

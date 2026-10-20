@@ -626,8 +626,8 @@ sequenceDiagram
 | 일반 회원가입 | CUSTOMER 기본 가입 | 일반 사용자는 CUSTOMER 권한으로 가입 |
 | OWNER 회원가입 | 별도 OWNER 가입 API | 가게 생성과 회원 생성을 분리해 도메인 결합도 완화 |
 | MASTER 생성 | 요청 body로 받지 않음 | seed 또는 관리 방식으로 MASTER 계정 생성 |
-| OWNER 탈퇴 | 활성 가게가 있으면 탈퇴 불가 | 탈퇴 후 가게 관리 주체가 사라지는 문제 방지 |
-| 활성 가게 기준 | `isDeleted=false` + `OPEN/CLOSED` | OUT_OF_BUSINESS는 탈퇴 가능 상태로 판단 |
+| OWNER 탈퇴 | 활성 가게 또는 진행 중 주문이 있으면 탈퇴 불가 | 가게가 폐업 상태여도 주문 완료·취소·거절 전에는 탈퇴 차단 |
+| 활성 가게 기준 | `isDeleted=false` + `OPEN/CLOSED` | OUT_OF_BUSINESS는 활성 가게에서 제외하되 진행 중 주문이 없어야 탈퇴 가능 |
 | 가게 삭제 | 진행 중 주문이 있으면 OWNER·MASTER 모두 삭제 불가 | 주문 완료·취소·거절만 종료 상태로 보며, 주문 생성과 삭제는 같은 가게 행 잠금으로 경합 방지 |
 | 카테고리 삭제 | 연결된 Store/Product가 있으면 삭제 불가 | 참조 데이터 보호 |
 | 결제 정책 | 주문 1건당 결제 1건 | 결제 이력과 주문 관계를 단순하고 명확하게 유지 |

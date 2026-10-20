@@ -23,6 +23,7 @@ public enum GlobalErrorCode implements ErrorCode {
     DELETED_USER(HttpStatus.UNAUTHORIZED, "탈퇴한 회원입니다."),
     ALREADY_DELETED_USER(HttpStatus.CONFLICT, "이미 탈퇴한 회원입니다."),
     DELETE_FAILURE_LAST_MASTER(HttpStatus.CONFLICT, "현재 마지막 관리자이므로 회원탈퇴가 불가능합니다."),
+    DELETE_FAILURE_ACTIVE_ORDERS(HttpStatus.CONFLICT, "진행 중인 주문을 모두 처리한 후 탈퇴할 수 있습니다."),
     DELETE_FAILURE_OPEN_STORES(HttpStatus.CONFLICT, "먼저 가게 삭제/폐업 처리 후 MASTER에게 문의하세요."),
 
     // 배송지

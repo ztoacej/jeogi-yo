@@ -20,6 +20,11 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, OrderReposi
             UUID storeId, Collection<OrderStatus> terminalStatuses
     );
 
+    // 가게의 폐업·삭제 여부와 무관하게 소유자의 미종료 주문을 확인한다.
+    boolean existsByStore_Owner_UserIdAndOrderStatusNotInAndIsDeletedFalse(
+            UUID ownerId, Collection<OrderStatus> terminalStatuses
+    );
+
     // 결제 생성의 상태 검증부터 저장까지 주문 취소 UPDATE와 직렬화한다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from Order o where o.orderId = :orderId and o.isDeleted = false")

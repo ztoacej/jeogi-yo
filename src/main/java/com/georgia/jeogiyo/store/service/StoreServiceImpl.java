@@ -167,13 +167,21 @@ public class StoreServiceImpl implements StoreService {
 
     // USER 탈퇴 로직에서 OWNER가 활성 가게를 가지고 있는지 확인합니다.
     // 활성 가게 기준은 isDeleted=false AND storeStatus IN (OPEN, CLOSED)입니다.
-    // OUT_OF_BUSINESS 상태의 가게는 탈퇴 가능한 상태로 봅니다.
+    // OUT_OF_BUSINESS는 활성 가게에서 제외하지만, 탈퇴 시 진행 중 주문도 별도로 검증합니다.
     @Override
     @Transactional(readOnly = true)
     public boolean existsActiveStoreByOwnerId(UUID ownerId) {
         return storeRepository.existsByOwner_UserIdAndStoreStatusInAndIsDeletedFalse(
                 ownerId,
                 List.of(StoreStatus.OPEN, StoreStatus.CLOSED)
+        );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean existsActiveOrderByOwnerId(UUID ownerId) {
+        return orderRepository.existsByStore_Owner_UserIdAndOrderStatusNotInAndIsDeletedFalse(
+                ownerId, TERMINAL_ORDER_STATUSES
         );
     }
 
