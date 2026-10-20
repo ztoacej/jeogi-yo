@@ -40,7 +40,7 @@ public class AddressServiceImpl implements AddressService {
 
 		deliveryAreaValidator.validate(addressCreate.getRoadAddress());
 		
-		if(addressCreate.getIsDefault() == true) {
+		if(Boolean.TRUE.equals(addressCreate.getIsDefault())) {
 			Address defaultAddress = addressFinder.findByUserAndDefault(user)
 					.orElse(null);
 			
@@ -68,7 +68,7 @@ public class AddressServiceImpl implements AddressService {
 			deliveryAreaValidator.validate(addressUpdate.getRoadAddress());
 		}
 		
-		if(!address.isDefault() && addressUpdate.getIsDefault()) {
+		if(!address.isDefault() && Boolean.TRUE.equals(addressUpdate.getIsDefault())) {
 			Address defaultAddress = addressFinder.findByUserAndDefault(user)
 					.orElse(null);
 			
