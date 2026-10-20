@@ -23,6 +23,11 @@ public class Product extends BaseEntity {
     @Column(name = "product_id", nullable = false, updatable = false)
     private UUID productId;
 
+    // 재고의 bulk UPDATE도 버전을 올려 오래된 상품 정보가 재고를 덮어쓰지 못하게 한다.
+    @Version
+    @Column(nullable = false, columnDefinition = "bigint default 0")
+    private long version;
+
     // N(Product) : 1(Store)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "store_id", nullable = false)

@@ -20,7 +20,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, Product
     @Modifying(flushAutomatically = true)
     @Query("""
             update Product p
-            set p.stock = p.stock - :quantity
+            set p.stock = p.stock - :quantity, p.version = p.version + 1
             where p.productId = :productId
               and p.store.storeId = :storeId
               and p.isDeleted = false
@@ -37,7 +37,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, Product
     @Modifying(flushAutomatically = true)
     @Query("""
         update Product p
-        set p.stock = p.stock + :quantity
+        set p.stock = p.stock + :quantity, p.version = p.version + 1
         where p.productId = :productId
           and :quantity > 0
         """)
