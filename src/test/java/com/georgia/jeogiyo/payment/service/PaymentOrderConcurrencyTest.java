@@ -35,6 +35,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.aop.framework.ProxyFactory;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -42,6 +43,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.*;
@@ -69,6 +71,7 @@ class PaymentOrderConcurrencyTest {
     @Autowired private StoreRepository storeRepository;
     @Autowired private AddressRepository addressRepository;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private PaymentRepository paymentRepository;
     @Autowired private ProductRepository productRepository;
 
@@ -260,6 +263,53 @@ class PaymentOrderConcurrencyTest {
         assertThat(productRepository.findByProductIdAndIsDeletedFalse(productId).orElseThrow().getStock()).isZero();
         assertThat(paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(orderId).orElseThrow().getPaymentStatus())
                 .isEqualTo(PaymentStatus.SUCCESS);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "CUSTOMER,4,false", "CUSTOMER,4,true",
+            "CUSTOMER,6,false", "CUSTOMER,6,true",
+            "MASTER,4,false", "MASTER,4,true",
+            "MASTER,6,false", "MASTER,6,true"
+    })
+    @DisplayName("주문·결제 취소 모두 고객에게 주문 후 5분 제한을 적용하고 관리자는 제외한다")
+    void cancellationDeadline_consistentAcrossRoutes(Role role, int orderAgeMinutes, boolean viaPayment) {
+        pay();
+        UUID paymentId = paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(orderId).orElseThrow().getPaymentId();
+        // 결제 시각은 최신으로 유지한다. 취소 기한은 주문 생성 시각을 기준으로 판단해야 한다.
+        jdbcTemplate.update("update p_order set created_at = ? where order_id = ?",
+                LocalDateTime.now().minusMinutes(orderAgeMinutes), orderId);
+        String requester = loginId;
+        if (role == Role.MASTER) {
+            requester = userRepository.save(user("m" + UUID.randomUUID().toString().substring(0, 8), Role.MASTER)).getLoginId();
+        }
+        String actor = requester;
+        Runnable cancellation = () -> {
+            if (viaPayment) {
+                paymentService.cancelPayment(paymentId, actor, DomainTestFixture.paymentCancelRequest("취소 기한 검증"));
+            } else {
+                OrderCancelRequest request = new OrderCancelRequest();
+                request.setCancelReason("취소 기한 검증");
+                orderService.cancelOrder(actor, orderId, request);
+            }
+        };
+
+        if (role == Role.CUSTOMER && orderAgeMinutes > 5) {
+            assertThatThrownBy(cancellation::run).isInstanceOf(BusinessException.class)
+                    .hasMessage(GlobalErrorCode.ORDER_CANCEL_TIME_EXPIRED.getMessage());
+            assertThat(orderRepository.findByOrderIdAndIsDeletedFalse(orderId).orElseThrow().getOrderStatus())
+                    .isEqualTo(OrderStatus.ORDER_REQUESTED);
+            assertThat(productRepository.findByProductIdAndIsDeletedFalse(productId).orElseThrow().getStock()).isZero();
+            var payment = paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(orderId).orElseThrow();
+            assertThat(payment.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+            assertThat(payment.getCanceledAt()).isNull();
+            assertThat(payment.getCancelReason()).isNull();
+        } else {
+            cancellation.run();
+            assertTerminatedAndStockRestored(OrderStatus.CANCELLED);
+            assertThat(paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(orderId).orElseThrow().getPaymentStatus())
+                    .isEqualTo(PaymentStatus.CANCEL);
+        }
     }
 
     private void terminate(OrderStatus status) {

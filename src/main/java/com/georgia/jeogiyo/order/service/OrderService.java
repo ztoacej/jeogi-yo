@@ -357,9 +357,7 @@ public class OrderService {
             if (order.getOrderStatus() != OrderStatus.ORDER_REQUESTED) {
                 throw new BusinessException(GlobalErrorCode.ORDER_ALREADY_ACCEPTED);
             }
-            if (order.getCreatedAt().plusMinutes(5).isBefore(LocalDateTime.now())) {
-                throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_TIME_EXPIRED);
-            }
+            validateCustomerCancellationDeadline(order);
         } else {
             if (order.getOrderStatus() == OrderStatus.DELIVERED
                     || order.getOrderStatus() == OrderStatus.CANCELLED
@@ -395,11 +393,27 @@ public class OrderService {
     @Transactional
     public void cancelByPayment(UUID orderId, String loginId) {
 
+        User user = userRepository.findByLoginIdAndIsDeletedFalse(loginId)
+                .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_USER));
+
+        if (user.getRole() != Role.CUSTOMER && user.getRole() != Role.MASTER) {
+            throw new BusinessException(GlobalErrorCode.FORBIDDEN);
+        }
+
         Order order = orderRepository.findByOrderIdAndIsDeletedFalse(orderId)
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_ORDER));
 
         if (order.getOrderStatus() != OrderStatus.ORDER_REQUESTED) {
             throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_NOT_ALLOWED);
+        }
+
+        // 결제 취소를 통한 주문 취소에도 동일한 고객 소유권·시간 제한을 적용한다.
+        // MASTER는 기존 정책대로 시간 제한 없이 취소할 수 있다.
+        if (user.getRole() == Role.CUSTOMER) {
+            if (!order.getUserId().equals(user.getUserId())) {
+                throw new BusinessException(GlobalErrorCode.FORBIDDEN_ORDER);
+            }
+            validateCustomerCancellationDeadline(order);
         }
 
         int updatedRows = orderRepository.updateStatusIfCurrent(
@@ -416,6 +430,12 @@ public class OrderService {
         restoreStock(orderId);
 
         order.changeStatus(OrderStatus.CANCELLED);
+    }
+
+    private void validateCustomerCancellationDeadline(Order order) {
+        if (order.getCreatedAt().plusMinutes(5).isBefore(LocalDateTime.now())) {
+            throw new BusinessException(GlobalErrorCode.ORDER_CANCEL_TIME_EXPIRED);
+        }
     }
 
     private void restoreStock(UUID orderId) {

@@ -875,6 +875,7 @@ class OrderServiceTest {
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
         OrderItem orderItem = orderItem(ORDER_ID, PRODUCT_ID, 2, 12000, 24000);
 
+        given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
         given(orderRepository.updateStatusIfCurrent(ORDER_ID, OrderStatus.ORDER_REQUESTED, OrderStatus.CANCELLED)).willReturn(1);
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(orderItem));
@@ -896,6 +897,7 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
 
+        given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
         given(orderRepository.updateStatusIfCurrent(
                 ORDER_ID,
@@ -920,10 +922,36 @@ class OrderServiceTest {
         Address address = address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172");
         Order order = order(customer, store, address, ORDER_ID, OrderStatus.ORDER_ACCEPTED, 24000);
 
+        given(userRepository.findByLoginIdAndIsDeletedFalse(CUSTOMER_LOGIN_ID)).willReturn(Optional.of(customer));
         given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.cancelByPayment(ORDER_ID, CUSTOMER_LOGIN_ID))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("취소할 수 없는 상태");
+    }
+
+    @Test
+    @DisplayName("cancelByPayment는 OWNER 요청을 거절한다")
+    void cancelByPayment_owner_forbidden() {
+        given(userRepository.findByLoginIdAndIsDeletedFalse(OWNER_LOGIN_ID)).willReturn(Optional.of(owner()));
+        assertThatThrownBy(() -> orderService.cancelByPayment(ORDER_ID, OWNER_LOGIN_ID))
+                .isInstanceOf(BusinessException.class).hasMessage(GlobalErrorCode.FORBIDDEN.getMessage());
+        then(orderRepository).shouldHaveNoInteractions();
+        then(productRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("cancelByPayment는 다른 고객의 주문을 취소할 수 없다")
+    void cancelByPayment_otherCustomer_forbidden() {
+        User customer = customer();
+        Store store = store(owner(), category());
+        Order order = order(customer, store, address(customer, ADDRESS_ID, "서울특별시 종로구 세종대로 172"),
+                ORDER_ID, OrderStatus.ORDER_REQUESTED, 24000);
+        given(userRepository.findByLoginIdAndIsDeletedFalse(OTHER_CUSTOMER_LOGIN_ID)).willReturn(Optional.of(otherCustomer()));
+        given(orderRepository.findByOrderIdAndIsDeletedFalse(ORDER_ID)).willReturn(Optional.of(order));
+        assertThatThrownBy(() -> orderService.cancelByPayment(ORDER_ID, OTHER_CUSTOMER_LOGIN_ID))
+                .isInstanceOf(BusinessException.class).hasMessage(GlobalErrorCode.FORBIDDEN_ORDER.getMessage());
+        then(orderRepository).should(never()).updateStatusIfCurrent(any(), any(), any());
+        then(productRepository).shouldHaveNoInteractions();
     }
 }
