@@ -104,7 +104,7 @@ public class StoreServiceImpl implements StoreService {
     @Override
     public StoreResponse updateStore(UUID storeId, String loginId, StoreUpdateRequest request) {
         User user = userFinder.getUserByLoginId(loginId);
-        Store store = findStore(storeId);
+        Store store = findStoreForUpdate(storeId);
 
         validateOwnerOrMaster(user, store);
 
@@ -135,7 +135,7 @@ public class StoreServiceImpl implements StoreService {
     @Override
     public StoreResponse updateStoreStatus(UUID storeId, String loginId, StoreStatusUpdateRequest request) {
         User user = userFinder.getUserByLoginId(loginId);
-        Store store = findStore(storeId);
+        Store store = findStoreForUpdate(storeId);
 
         validateOwnerOrMaster(user, store);
 
@@ -150,8 +150,7 @@ public class StoreServiceImpl implements StoreService {
     @Override
     public void deleteStore(UUID storeId, String loginId) {
         User user = userFinder.getUserByLoginId(loginId);
-        Store store = storeRepository.findByStoreIdForUpdate(storeId)
-                .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_STORE));
+        Store store = findStoreForUpdate(storeId);
 
         validateOwnerOrMaster(user, store);
 
@@ -187,6 +186,12 @@ public class StoreServiceImpl implements StoreService {
 
     private Store findStore(UUID storeId) {
         return storeRepository.findByStoreIdAndIsDeletedFalse(storeId)
+                .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_STORE));
+    }
+
+    // 수정·상태 변경·삭제가 같은 행 잠금을 사용하여 삭제된 상태의 덮어쓰기를 막는다.
+    private Store findStoreForUpdate(UUID storeId) {
+        return storeRepository.findByStoreIdForUpdate(storeId)
                 .orElseThrow(() -> new BusinessException(GlobalErrorCode.NOT_FOUND_STORE));
     }
 

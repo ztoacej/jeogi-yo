@@ -17,7 +17,7 @@ import java.util.UUID;
 
 public interface StoreRepository extends JpaRepository<Store, UUID>, StoreRepositoryCustom {
     Optional<Store> findByStoreIdAndIsDeletedFalse(UUID storeId);
-    // 주문 생성과 가게 삭제는 같은 행 잠금을 사용해 검사와 변경 사이의 경합을 막는다.
+    // 주문 생성·가게 수정·상태 변경·삭제는 같은 행 잠금으로 검사와 변경 사이의 경합을 막는다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from Store s where s.storeId = :storeId and s.isDeleted = false")
     Optional<Store> findByStoreIdForUpdate(@Param("storeId") UUID storeId);

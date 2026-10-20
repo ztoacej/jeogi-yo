@@ -25,7 +25,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import com.georgia.jeogiyo.store.dto.request.StoreUpdateRequest;
+import org.springframework.test.util.ReflectionTestUtils;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -90,6 +93,7 @@ class StoreDeletionIntegrationTest {
     void setUp() {
         gates.beforeOrderSave = null;
         gates.afterActiveCheck = null;
+        gates.afterStoreRead = null;
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         owner = userRepository.save(user("o" + suffix, Role.OWNER));
         customer = userRepository.save(user("c" + suffix, Role.CUSTOMER));
@@ -227,6 +231,99 @@ class StoreDeletionIntegrationTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("가게 수정·상태 변경이 먼저면 삭제가 대기하고, 변경 내용과 삭제 이력이 모두 유지된다")
+    void mutationFirst_deletionWaitsAndPreservesChanges(boolean statusChange) throws Exception {
+        CountDownLatch read = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        pauseFirstStoreRead(read, release);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> mutation = executor.submit(() -> mutateStore(statusChange));
+            await(read);
+            CountDownLatch started = new CountDownLatch(1);
+            Future<?> deletion = executor.submit(() -> {
+                started.countDown();
+                storeService.deleteStore(store.getStoreId(), owner.getLoginId());
+            });
+            await(started);
+            try {
+                assertThatThrownBy(() -> deletion.get(300, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            } finally { release.countDown(); }
+            mutation.get(10, TimeUnit.SECONDS);
+            deletion.get(10, TimeUnit.SECONDS);
+            Store stored = storeRepository.findById(store.getStoreId()).orElseThrow();
+            assertThat(stored.isDeleted()).isTrue();
+            assertThat(stored.getDeletedAt()).isNotNull();
+            assertThat(stored.getDeletedBy()).isEqualTo(owner.getLoginId());
+            assertThat(stored.getStoreName()).isEqualTo(statusChange ? store.getStoreName() : "변경된 가게명");
+            assertThat(stored.getStoreStatus()).isEqualTo(statusChange ? StoreStatus.CLOSED : StoreStatus.OPEN);
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("가게 삭제가 먼저면 수정·상태 변경은 대기 후 거절되며 삭제 표시와 이력을 되돌리지 않는다")
+    void deletionFirst_mutationWaitsAndFails(boolean statusChange) throws Exception {
+        CountDownLatch read = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        pauseFirstStoreRead(read, release);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> deletion = executor.submit(() -> storeService.deleteStore(store.getStoreId(), owner.getLoginId()));
+            await(read);
+            CountDownLatch started = new CountDownLatch(1);
+            Future<?> mutation = executor.submit(() -> {
+                started.countDown();
+                mutateStore(statusChange);
+            });
+            await(started);
+            try {
+                assertThatThrownBy(() -> mutation.get(300, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            } finally { release.countDown(); }
+            deletion.get(10, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> mutation.get(10, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class).hasCauseInstanceOf(BusinessException.class)
+                    .hasRootCauseMessage(GlobalErrorCode.NOT_FOUND_STORE.getMessage());
+            Store stored = storeRepository.findById(store.getStoreId()).orElseThrow();
+            assertThat(stored.isDeleted()).isTrue();
+            assertThat(stored.getDeletedAt()).isNotNull();
+            assertThat(stored.getDeletedBy()).isEqualTo(owner.getLoginId());
+            assertThat(stored.getStoreName()).isEqualTo(store.getStoreName());
+            assertThat(stored.getStoreStatus()).isEqualTo(StoreStatus.OPEN);
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    private void pauseFirstStoreRead(CountDownLatch read, CountDownLatch release) {
+        AtomicBoolean first = new AtomicBoolean(true);
+        gates.afterStoreRead = () -> {
+            if (first.compareAndSet(true, false)) {
+                read.countDown();
+                await(release);
+            }
+        };
+    }
+
+    private void mutateStore(boolean statusChange) {
+        if (statusChange) {
+            storeService.updateStoreStatus(store.getStoreId(), owner.getLoginId(),
+                    DomainTestFixture.storeStatusRequest(StoreStatus.CLOSED));
+        } else {
+            StoreUpdateRequest request = new StoreUpdateRequest();
+            ReflectionTestUtils.setField(request, "storeName", "변경된 가게명");
+            storeService.updateStore(store.getStoreId(), owner.getLoginId(), request);
+        }
+    }
+
     private static void await(CountDownLatch latch) {
         try {
             if (!latch.await(10, TimeUnit.SECONDS)) throw new AssertionError("동시성 테스트 동기화 시간 초과");
@@ -239,16 +336,21 @@ class StoreDeletionIntegrationTest {
     static class Gates implements BeanPostProcessor {
         volatile Runnable beforeOrderSave;
         volatile Runnable afterActiveCheck;
+        volatile Runnable afterStoreRead;
 
         @Override
         public Object postProcessAfterInitialization(Object bean, String name) {
-            if (!name.equals("orderRepository")) return bean;
+            if (!name.equals("orderRepository") && !name.equals("storeRepository")) return bean;
             ProxyFactory proxy = new ProxyFactory(bean);
             proxy.addAdvice((MethodInterceptor) invocation -> {
-                if (invocation.getMethod().getName().equals("save") && beforeOrderSave != null) beforeOrderSave.run();
+                if (name.equals("orderRepository") && invocation.getMethod().getName().equals("save")
+                        && beforeOrderSave != null) beforeOrderSave.run();
                 Object result = invocation.proceed();
-                if (invocation.getMethod().getName().equals("existsByStore_StoreIdAndOrderStatusNotInAndIsDeletedFalse")
+                if (name.equals("orderRepository") && invocation.getMethod().getName().equals("existsByStore_StoreIdAndOrderStatusNotInAndIsDeletedFalse")
                         && afterActiveCheck != null) afterActiveCheck.run();
+                // 일반 조회도 감시하여 잠금을 제거한 이전 코드에서 동일한 경합을 재현한다.
+                if (name.equals("storeRepository") && invocation.getMethod().getName().startsWith("findByStoreId")
+                        && afterStoreRead != null) afterStoreRead.run();
                 return result;
             });
             return proxy.getProxy();
