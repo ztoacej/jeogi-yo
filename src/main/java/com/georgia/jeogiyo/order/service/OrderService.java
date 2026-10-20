@@ -323,6 +323,13 @@ public class OrderService {
             throw new BusinessException(GlobalErrorCode.INVALID_ORDER_STATUS_TRANSITION);
         }
 
+        // 상태 전환에 성공한 요청만 재고와 결제를 정리한다.
+        // 결제 생성의 주문 행 잠금과 직렬화되므로 진행 중인 결제도 커밋 후 조회한다.
+        if (nextStatus == OrderStatus.ORDER_REJECTED) {
+            restoreStock(orderId);
+            cancelSuccessfulPayment(orderId, "가게 주문 거절");
+        }
+
         // bulk update 이후 응답에 사용할 영속 엔티티 상태를 맞춘다.
         order.changeStatus(nextStatus);
         entityManager.flush();
@@ -374,20 +381,9 @@ public class OrderService {
         }
 
         // 조건부 상태 변경에 성공한 최초 요청만 재고 복구를 수행한다.
-        List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
-        for (OrderItem item : orderItems) {
-            int restoredRows = productRepository.increaseStock(item.getProductId(), item.getQuantity());
+        restoreStock(orderId);
 
-            if (restoredRows != 1) {
-                throw new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT);
-            }
-        }
-
-        paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(orderId).ifPresent(payment -> {
-            if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
-                payment.cancel(request.getCancelReason());
-            }
-        });
+        cancelSuccessfulPayment(orderId, request.getCancelReason());
 
         // bulk update 이후 응답/테스트에서 사용할 엔티티 상태를 맞춘다.
         order.changeStatus(OrderStatus.CANCELLED);
@@ -417,6 +413,12 @@ public class OrderService {
         }
 
         // 조건부 상태 변경에 성공한 최초 요청만 재고 복구를 수행한다.
+        restoreStock(orderId);
+
+        order.changeStatus(OrderStatus.CANCELLED);
+    }
+
+    private void restoreStock(UUID orderId) {
         List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
         for (OrderItem item : orderItems) {
             int restoredRows = productRepository.increaseStock(item.getProductId(), item.getQuantity());
@@ -425,7 +427,13 @@ public class OrderService {
                 throw new BusinessException(GlobalErrorCode.NOT_FOUND_PRODUCT);
             }
         }
+    }
 
-        order.changeStatus(OrderStatus.CANCELLED);
+    private void cancelSuccessfulPayment(UUID orderId, String reason) {
+        paymentRepository.findByOrder_OrderIdAndIsDeletedFalse(orderId).ifPresent(payment -> {
+            if (payment.getPaymentStatus() == PaymentStatus.SUCCESS) {
+                payment.cancel(reason);
+            }
+        });
     }
 }
